@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Music Routine App v24 - Dashboard Previews</title>
+    <title>Music Routine App v26 - Editable Title</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
@@ -106,13 +106,11 @@
                     <span class="text-xl font-bold" id="global-bpm-display">120 BPM</span>
                     <i class="fas fa-caret-down cursor-pointer p-2 active:text-gray-200" onclick="adjustGlobalBPM(-1)"></i>
                 </div>
-                
                 <div class="w-1/3 flex justify-center">
                     <button id="global-play-btn" class="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center border-4 border-white/30 backdrop-blur-sm active:scale-95 transition-transform" onclick="toggleGlobalAudioOnly()">
                         <i class="fas fa-play text-3xl text-white pl-1" id="global-play-icon"></i>
                     </button>
                 </div>
-                
                 <div class="flex flex-col items-center w-1/3">
                     <span class="text-2xl font-bold">1/4</span>
                 </div>
@@ -156,7 +154,8 @@
 
         <div class="p-4 space-y-4 pb-10">
             <div class="bg-white rounded-xl p-6 shadow-sm">
-                <h2 id="detail-title" class="text-2xl text-gray-800 mb-2 font-normal">Title</h2>
+                <input type="text" id="detail-title-input" class="text-2xl text-gray-800 mb-2 font-normal w-full bg-transparent border-b border-transparent focus:border-[#E53935] outline-none transition-colors" value="Title" oninput="updateExerciseTitle(this.value)">
+                
                 <p class="text-gray-500 mb-6 flex justify-between items-center">
                     <span>Time: <span id="detail-time-display">0:00</span></span>
                     <span id="detail-reps-indicator" class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full font-bold">Rep 1/1</span>
@@ -213,8 +212,12 @@
 
             <div class="bg-white rounded-xl p-4 shadow-sm pb-8">
                 <p class="text-gray-700 font-medium mb-2">Comment</p>
-                <textarea id="detail-comment" class="w-full text-sm text-gray-600 border-none outline-none resize-none bg-transparent mb-2" rows="3" placeholder="Add notes (paste image links here)..." oninput="updateComment(this.value)"></textarea>
-                <div id="detail-image-preview" class="flex flex-wrap gap-2 mt-2"></div>
+                <textarea id="detail-comment" class="w-full text-sm text-gray-600 border-none outline-none resize-none bg-transparent mb-2" rows="3" placeholder="Add notes (paste URLs here)..." oninput="updateComment(this.value)"></textarea>
+                
+                <div id="detail-attachments" class="mt-3 space-y-3">
+                    <div id="detail-link-list" class="flex flex-col gap-2"></div>
+                    <div id="detail-image-preview" class="flex flex-wrap gap-2"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -272,8 +275,8 @@
     <script>
         // --- DATA & STATE ---
         const initialExercises = [
-            { id: 1, title: 'OMC (Demo 10s)', bpm: 80, durationSec: 10, remainingSec: 10, completed: false, autoStart: true, archived: false, reps: 3, currentRep: 1, comment: "Example: https://img.notionusercontent.com/s3/prod-files-secure%2Fbcbdab33-aec6-43be-9e0a-e424262fde34%2F9fe893b7-37d8-4dc8-9162-7490e0275f69%2Fimage.png/size/w=2000?exp=1769752669&sig=4RrCTSORdFK2fDIPXTUjoNu8RvLtJI44sMbhw_cG4BQ&id=2ba07a6e-c7ed-8023-8a93-e0296ab07557&table=block&userId=078dfb6a-9587-4188-9a35-a4eec027e309" },
-            { id: 2, title: 'Arpeggios', bpm: 80, durationSec: 120, remainingSec: 120, completed: false, autoStart: false, archived: false, reps: 1, currentRep: 1, comment: "" }
+            { id: 1, title: 'Major Scale', bpm: 80, durationSec: 10, remainingSec: 10, completed: false, autoStart: true, archived: false, reps: 1, currentRep: 1, comment: "Sheet Music: https://jtgt-static.b-cdn.net/images/modules/INT1/IM-113-MajorScale-P1.jpg" },
+            { id: 2, title: 'YouTube Link Test', bpm: 120, durationSec: 60, remainingSec: 60, completed: false, autoStart: false, archived: false, reps: 1, currentRep: 1, comment: "Watch this: https://www.youtube.com/watch?v=dQw4w9WgXcQ" }
         ];
 
         let state = {
@@ -285,7 +288,7 @@
             newExerciseForm: { bpm: 100, min: 2, sec: 0, reps: 1 }
         };
 
-        const STORAGE_KEY = 'musicRoutineApp_v11';
+        const STORAGE_KEY = 'musicRoutineApp_v13';
 
         function saveData() {
             if(state.activeExerciseId) {
@@ -305,12 +308,40 @@
                     const parsed = JSON.parse(data);
                     state.routines = parsed.routines;
                     state.currentRoutineId = parsed.currentRoutineId || 'default';
-                    // Migrations (omitted for brevity, assume valid structure or run robust import)
+                    state.routines.forEach(r => r.exercises.forEach(ex => {
+                        if (ex.durationSec === undefined && ex.duration !== undefined) { ex.durationSec = ex.duration * 60; delete ex.duration; }
+                        if (ex.remainingSec === undefined) ex.remainingSec = ex.durationSec;
+                        if (ex.autoStart === undefined) ex.autoStart = true;
+                        if (ex.archived === undefined) ex.archived = false;
+                        if (ex.reps === undefined) ex.reps = 1;
+                        if (ex.currentRep === undefined) ex.currentRep = 1;
+                        if (ex.comment === undefined) ex.comment = "";
+                    }));
                 } catch (e) { console.error("Error loading data", e); }
             }
         }
 
-        // --- IMAGE HELPERS ---
+        // --- TITLE EDIT LOGIC (NUEVO) ---
+        function updateExerciseTitle(newTitle) {
+            const ex = getExerciseById(state.viewingExerciseId);
+            if(ex) {
+                ex.title = newTitle;
+                saveData();
+                // Actualizar la lista en segundo plano si es posible, 
+                // pero como renderExercises reconstruye todo el DOM, podría cerrar la vista de detalles si no tenemos cuidado.
+                // En este diseño SPA simple, como el dashboard está oculto, podemos renderizar sin problemas.
+                renderExercises(); 
+            }
+        }
+
+        // --- URL HELPERS ---
+        function getFirstUrl(text) {
+            if (!text) return null;
+            const urlRegex = /(https?:\/\/[^\s]+)/i;
+            const match = text.match(urlRegex);
+            return match ? match[0] : null;
+        }
+
         function getFirstImage(text) {
             if(!text) return null;
             const urlRegex = /(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/i;
@@ -318,79 +349,45 @@
             return match ? match[0] : null;
         }
 
-        // --- RENDER EXERCISES (WITH PREVIEW) ---
-        function renderExercises() {
-            const list = document.getElementById('exercise-list'); list.innerHTML = '';
-            const currentRoutine = getCurrentRoutine(); if(!currentRoutine) return;
-            const visibleExercises = currentRoutine.exercises.filter(e => !e.archived);
-            const totalSec = visibleExercises.reduce((acc, curr) => acc + (curr.durationSec * curr.reps), 0);
-            document.getElementById('total-routine-time').innerText = formatTime(totalSec);
-
-            visibleExercises.forEach(ex => {
-                const isActive = ex.id === state.activeExerciseId;
-                const isTimerRunning = isActive && state.isExercisePlaying;
-                let progressPercent = 0;
-                const currentRemaining = isActive ? state.exerciseRemaining : ex.remainingSec;
-                let timeText = `${formatTime(currentRemaining)}/${formatTime(ex.durationSec)}`;
-                if (ex.completed) { progressPercent = 100; timeText = `${formatTime(ex.durationSec)}/${formatTime(ex.durationSec)}`; } 
-                else if(ex.durationSec > 0) { progressPercent = ((ex.durationSec - currentRemaining) / ex.durationSec) * 100; }
-
-                const repsBadge = ex.reps > 1 ? `<span class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded font-bold ml-2">Rep ${ex.currentRep}/${ex.reps}</span>` : '';
-                const autoIcon = !ex.autoStart ? '<i class="fas fa-volume-mute text-xs ml-2 text-gray-400"></i>' : '';
-                const startBtnClass = isTimerRunning ? "bg-[#E53935] text-white border-none" : "bg-white text-[#E53935] border border-red-100 shadow-sm";
-
-                // --- NEW IMAGE PREVIEW LOGIC ---
-                const imgUrl = getFirstImage(ex.comment);
-                const imgHtml = imgUrl ? `
-                    <div class="ml-2 flex-shrink-0">
-                        <img src="${imgUrl}" class="w-12 h-12 object-cover rounded border border-gray-200 bg-gray-50 shadow-sm cursor-zoom-in hover:opacity-80 transition" onclick="event.stopPropagation(); openImageModal('${imgUrl}')" onerror="this.style.display='none'">
-                    </div>
-                ` : '';
-
-                const el = document.createElement('div');
-                el.className = `draggable-item rounded-xl relative overflow-hidden transition-all shadow-sm border border-gray-100 mb-4 ${ex.completed ? 'bg-[#D1FAE5] border-green-200' : isActive ? 'bg-[#E0F2F1] border-green-100 scale-[1.02]' : 'bg-white'}`;
-                el.innerHTML = `
-                    <div class="absolute inset-0 bg-[rgba(0,200,83,0.2)] z-0 progress-bar-fill" style="width: ${progressPercent}%"></div>
-                    <div class="flex items-center justify-between relative z-10">
-                        <div class="flex items-center gap-4 flex-1 p-4" onclick="${!ex.completed ? `toggleListExercise(${ex.id})` : ''}">
-                            <div class="w-16 h-14 rounded-lg flex items-center justify-center font-bold text-lg transition-colors z-20 ${ex.completed ? 'bg-[#10B981] text-white' : startBtnClass}">
-                                ${ex.completed ? '<i class="fas fa-check"></i>' : isTimerRunning ? 'Stop' : 'Start'}
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <h3 class="font-medium text-gray-800 ${ex.completed ? 'text-green-800' : ''} truncate">${ex.title}</h3>
-                                <div class="flex items-center mt-1">
-                                    <p class="text-xs ${isActive ? 'font-bold' : 'text-gray-400'} flex items-center gap-2">
-                                        ${timeText} <span class="bg-black/5 px-1.5 rounded font-normal text-gray-500">${ex.bpm} BPM</span> ${autoIcon}
-                                    </p>
-                                    ${repsBadge}
-                                </div>
-                            </div>
-                            ${imgHtml}
-                        </div>
-                        <div class="py-8 px-5 text-gray-300 hover:text-[#E53935]" onpointerdown="event.stopPropagation()" onclick="openDetailsView(${ex.id})"><i class="fas fa-chevron-right"></i></div>
-                    </div>`;
-                list.appendChild(el);
-            });
-        }
-
-        // --- IMAGE MODAL LOGIC (REUSED) ---
-        function renderCommentImages(text) {
-            const container = document.getElementById('detail-image-preview');
-            container.innerHTML = '';
+        // --- PARSING & RENDERING ATTACHMENTS ---
+        function renderCommentAttachments(text) {
+            const imgContainer = document.getElementById('detail-image-preview');
+            const linkContainer = document.getElementById('detail-link-list');
+            imgContainer.innerHTML = '';
+            linkContainer.innerHTML = '';
+            
             if (!text) return;
-            const urlRegex = /(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/ig;
-            const matches = text.match(urlRegex);
-            if (matches) {
-                matches.forEach(url => {
+
+            const imgRegex = /(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/ig;
+            const images = text.match(imgRegex);
+            if (images) {
+                images.forEach(url => {
                     const img = document.createElement('img');
                     img.src = url;
                     img.className = "w-20 h-20 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition shadow-sm bg-gray-50";
                     img.onclick = () => openImageModal(url);
                     img.onerror = () => img.style.display = 'none';
-                    container.appendChild(img);
+                    imgContainer.appendChild(img);
+                });
+            }
+
+            const urlRegex = /(https?:\/\/[^\s]+)/ig;
+            const allLinks = text.match(urlRegex);
+            if (allLinks) {
+                allLinks.forEach(url => {
+                    const isImg = images && images.includes(url);
+                    if(!isImg) {
+                        const btn = document.createElement('a');
+                        btn.href = url;
+                        btn.target = "_blank";
+                        btn.className = "flex items-center gap-2 text-[#E53935] hover:underline bg-red-50 p-2 rounded text-sm w-fit max-w-full truncate";
+                        btn.innerHTML = `<i class="fas fa-link"></i> <span class="truncate">${url}</span>`;
+                        linkContainer.appendChild(btn);
+                    }
                 });
             }
         }
+
         function openImageModal(url) {
             const modal = document.getElementById('image-lightbox');
             const img = document.getElementById('lightbox-img');
@@ -398,6 +395,7 @@
             modal.classList.remove('hidden');
             setTimeout(() => img.classList.remove('scale-95'), 10);
         }
+
         function closeImageModal() {
             const modal = document.getElementById('image-lightbox');
             const img = document.getElementById('lightbox-img');
@@ -422,7 +420,7 @@
             updateUI();
         };
 
-        // --- RESTO DE FUNCIONES (Igual a v23) ---
+        // --- STANDARD LOGIC ---
         function importRoutines(input) {
             const f = input.files[0]; if (!f) return;
             const r = new FileReader();
@@ -526,6 +524,73 @@
             else { icon.className = "fas fa-play text-3xl text-white pl-1"; btn.classList.remove('bg-white/40'); }
         }
 
+        function renderExercises() {
+            const list = document.getElementById('exercise-list'); list.innerHTML = '';
+            const currentRoutine = getCurrentRoutine(); if(!currentRoutine) return;
+            const visibleExercises = currentRoutine.exercises.filter(e => !e.archived);
+            const totalSec = visibleExercises.reduce((acc, curr) => acc + (curr.durationSec * curr.reps), 0);
+            document.getElementById('total-routine-time').innerText = formatTime(totalSec);
+
+            visibleExercises.forEach(ex => {
+                const isActive = ex.id === state.activeExerciseId;
+                const isTimerRunning = isActive && state.isExercisePlaying;
+                let progressPercent = 0;
+                const currentRemaining = isActive ? state.exerciseRemaining : ex.remainingSec;
+                let timeText = `${formatTime(currentRemaining)}/${formatTime(ex.durationSec)}`;
+                if (ex.completed) { progressPercent = 100; timeText = `${formatTime(ex.durationSec)}/${formatTime(ex.durationSec)}`; } 
+                else if(ex.durationSec > 0) { progressPercent = ((ex.durationSec - currentRemaining) / ex.durationSec) * 100; }
+
+                const repsBadge = ex.reps > 1 ? `<span class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded font-bold ml-2">Rep ${ex.currentRep}/${ex.reps}</span>` : '';
+                const autoIcon = !ex.autoStart ? '<i class="fas fa-volume-mute text-xs ml-2 text-gray-400"></i>' : '';
+                const startBtnClass = isTimerRunning ? "bg-[#E53935] text-white border-none" : "bg-white text-[#E53935] border border-red-100 shadow-sm";
+
+                // --- DASHBOARD ATTACHMENTS ---
+                const imgUrl = getFirstImage(ex.comment);
+                const anyUrl = getFirstUrl(ex.comment);
+                
+                let rightContent = '';
+                if(imgUrl) {
+                    rightContent += `
+                        <img src="${imgUrl}" class="w-12 h-12 flex-shrink-0 object-cover rounded border border-gray-200 bg-gray-50 shadow-sm cursor-zoom-in hover:opacity-80 transition ml-2" 
+                             onclick="event.stopPropagation(); openImageModal('${imgUrl}')" onerror="this.style.display='none'">
+                    `;
+                }
+                if(anyUrl) {
+                    rightContent += `
+                        <button onclick="event.stopPropagation(); window.open('${anyUrl}', '_blank')" class="w-10 h-10 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-[#E53935] hover:bg-gray-100 rounded-full transition ml-1" title="Open Link">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                    `;
+                }
+
+                const el = document.createElement('div');
+                el.className = `draggable-item rounded-xl relative overflow-hidden transition-all shadow-sm border border-gray-100 mb-4 ${ex.completed ? 'bg-[#D1FAE5] border-green-200' : isActive ? 'bg-[#E0F2F1] border-green-100 scale-[1.02]' : 'bg-white'}`;
+                el.innerHTML = `
+                    <div class="absolute inset-0 bg-[rgba(0,200,83,0.2)] z-0 progress-bar-fill" style="width: ${progressPercent}%"></div>
+                    <div class="flex items-center justify-between relative z-10 pr-2">
+                        <div class="flex items-center gap-4 flex-1 p-4" onclick="${!ex.completed ? `toggleListExercise(${ex.id})` : ''}">
+                            <div class="w-16 h-14 rounded-lg flex items-center justify-center font-bold text-lg transition-colors z-20 flex-shrink-0 ${ex.completed ? 'bg-[#10B981] text-white' : startBtnClass}">
+                                ${ex.completed ? '<i class="fas fa-check"></i>' : isTimerRunning ? 'Stop' : 'Start'}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <h3 class="font-medium text-gray-800 ${ex.completed ? 'text-green-800' : ''} truncate">${ex.title}</h3>
+                                <div class="flex items-center mt-1">
+                                    <p class="text-xs ${isActive ? 'font-bold' : 'text-gray-400'} flex items-center gap-2">
+                                        ${timeText} <span class="bg-black/5 px-1.5 rounded font-normal text-gray-500">${ex.bpm} BPM</span> ${autoIcon}
+                                    </p>
+                                    ${repsBadge}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center">
+                            ${rightContent}
+                            <div class="py-4 pl-3 pr-4 text-gray-300 hover:text-[#E53935] cursor-pointer" onpointerdown="event.stopPropagation()" onclick="openDetailsView(${ex.id})"><i class="fas fa-chevron-right"></i></div>
+                        </div>
+                    </div>`;
+                list.appendChild(el);
+            });
+        }
+
         const AudioContext = window.AudioContext||window.webkitAudioContext; let audioCtx,nextTime=0,timer,beat=0;
         function initAudio() { if(!audioCtx)audioCtx=new AudioContext(); if(audioCtx.state==='suspended')audioCtx.resume(); }
         function playOsc(t) { const o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value=beat===0?1000:800; g.gain.setValueAtTime(beat===0?1:0.6,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.1); o.start(t); o.stop(t+0.1); }
@@ -537,9 +602,12 @@
         function formatTime(s) { const m = Math.floor(s/60); const sec = s%60; return `${m}:${sec.toString().padStart(2, '0')}`; }
         function getCurrentRoutine() { return state.routines.find(r => r.id === state.currentRoutineId); }
         function getExerciseById(id) { return getCurrentRoutine().exercises.find(e => e.id === id); }
+        
         function openDetailsView(id) {
             state.viewingExerciseId = id; const ex = getExerciseById(id);
-            document.getElementById('detail-title').innerText = ex.title;
+            // SET EDITABLE TITLE
+            document.getElementById('detail-title-input').value = ex.title;
+            
             document.getElementById('detail-bpm').innerText = `${ex.bpm} BPM`;
             document.getElementById('detail-min-display').innerText = `${Math.floor(ex.durationSec / 60)} min`;
             document.getElementById('detail-sec-display').innerText = `${(ex.durationSec % 60).toString().padStart(2, '0')} sec`;
@@ -553,7 +621,9 @@
             document.getElementById('details-view').classList.add('active');
             const displayTime = (state.activeExerciseId === id) ? state.exerciseRemaining : ex.remainingSec;
             document.getElementById('detail-time-display').innerText = formatTime(displayTime);
-            renderCommentImages(ex.comment);
+            
+            renderCommentAttachments(ex.comment);
+            
             updateDetailsUI();
         }
         function updateDetailsUI() { const btn = document.getElementById('detail-play-btn'); const active = state.activeExerciseId === state.viewingExerciseId && state.isExercisePlaying; btn.innerText = active ? "Pause" : "Start"; btn.className = active ? "flex-1 py-3 text-white bg-[#E53935] rounded-lg" : "flex-1 py-3 text-[#E53935] bg-white border rounded-lg"; }
@@ -575,7 +645,7 @@
         function adjustNewTime(type,val) { if(type==='min') state.newExerciseForm.min=Math.max(0,state.newExerciseForm.min+val); else state.newExerciseForm.sec=Math.max(0,state.newExerciseForm.sec+val); document.getElementById('new-min-display').innerText=`${state.newExerciseForm.min} min`; document.getElementById('new-sec-display').innerText=`${state.newExerciseForm.sec.toString().padStart(2,'0')} sec`; }
         function addNewExercise() { const t=document.getElementById('new-title').value; if(!t)return; const total=(state.newExerciseForm.min*60)+state.newExerciseForm.sec; getCurrentRoutine().exercises.push({id:Date.now(),title:t,bpm:state.newExerciseForm.bpm,durationSec:total,remainingSec:total,completed:false,autoStart:document.getElementById('new-autostart').checked,archived:false,reps:state.newExerciseForm.reps,currentRep:1}); saveData(); toggleModal(false); updateUI(); }
         function toggleAutoplay(c) { state.autoplayRoutine=c; }
-        function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); renderCommentImages(v); }
+        function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); renderCommentAttachments(v); }
         function adjustDetailReps(v) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; ex.reps=Math.max(1,ex.reps+v); if(ex.currentRep>ex.reps)ex.currentRep=1; saveData(); document.getElementById('detail-reps-display').innerText=ex.reps; document.getElementById('detail-reps-indicator').innerText=`Rep ${ex.currentRep}/${ex.reps}`; updateUI(); }
         function adjustDetailTime(type,val) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; let total=ex.durationSec; if(type==='min') total=Math.max(0,total+(val*60)); else total=Math.max(0,total+val); ex.durationSec=total; ex.remainingSec=total; saveData(); document.getElementById('detail-min-display').innerText=`${Math.floor(total/60)} min`; document.getElementById('detail-sec-display').innerText=`${(total%60).toString().padStart(2,'0')} sec`; }
         function resetCurrentDetailExercise() { const id=state.viewingExerciseId; const ex=getExerciseById(id); if(ex){ ex.remainingSec=ex.durationSec; ex.completed=false; ex.currentRep=1; if(state.activeExerciseId===id){ pauseSequence(); state.exerciseRemaining=ex.durationSec; } saveData(); updateDetailsUI(); } }
