@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Music Routine App v17 - Fixed UI Logic</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    
+    <style>
+        :root {
+            --primary-red: #E53935;
+            --primary-dark: #C62828;
+            --bg-light: #F5F5F5;
+            --active-mint: #E0F2F1;
+            --completed-green: #D1FAE5;
+            /* Hacemos la barra un poco más visible para notar el progreso pausado */
+            --progress-bar: rgba(0, 200, 83, 0.2); 
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg-light);
+            overscroll-behavior-y: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+            user-select: none;
+        }
+
+        .view-section { display: none; height: 100vh; flex-direction: column; }
+        .view-section.active { display: flex; }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%;
+            background: var(--primary-red); margin-top: -8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        input[type=range]::-webkit-slider-runnable-track { height: 4px; background: #ddd; border-radius: 2px; }
+
+        .sidebar-transition { transition: transform 0.3s ease-in-out; }
+        .sortable-ghost { opacity: 0.4; background-color: #ddd; border: 2px dashed #999; }
+        .sortable-drag { cursor: grabbing; opacity: 1; background: white; box-shadow: 0 10px 20px rgba(0,0,0,0.2); transform: scale(1.02); }
+        .draggable-item { cursor: grab; }
+        .fade-enter { opacity: 0; transform: scale(0.95); }
+        .fade-enter-active { opacity: 1; transform: scale(1); transition: opacity 0.1s, transform 0.1s; }
+        
+        /* Transición suave para la barra de progreso */
+        .progress-bar-fill { transition: width 0.3s linear; }
+    </style>
+</head>
+<body class="overflow-hidden" onclick="handleWindowClick(event)">
+
+    <div id="sidebar-overlay" onclick="toggleSidebar(false)" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden transition-opacity"></div>
+    
+    <div id="sidebar-menu" class="fixed inset-y-0 left-0 w-72 bg-[#E53935] text-white z-50 transform -translate-x-full sidebar-transition flex flex-col shadow-2xl">
+        <div class="p-4 pb-2">
+             <h2 class="text-xl font-bold mb-4 px-2">My Routines</h2>
+            <ul id="routine-list-container" class="space-y-2 mb-4"></ul>
+            <div class="flex items-center justify-between mt-6 pt-4 border-t border-white/20" id="add-routine-section">
+                 <button onclick="showAddRoutineInput()" class="flex items-center gap-3 font-medium hover:bg-white/10 p-2 rounded w-full">
+                    <i class="fas fa-plus bg-white/20 p-1 rounded text-xs"></i> Add Routine
+                </button>
+            </div>
+        </div>
+        
+        <div class="p-4 border-t border-white/20 border-b">
+            <button onclick="showArchivedCount()" class="font-medium flex items-center gap-2 w-full text-left hover:text-white/80">
+                <i class="fas fa-archive"></i> Archived Exercises
+            </button>
+        </div>
+        
+        <div class="p-4 border-b border-white/20">
+            <h3 class="text-sm uppercase text-white/60 font-bold mb-3 tracking-wider">Data Backup</h3>
+            <div class="space-y-2">
+                <button onclick="exportRoutines()" class="flex items-center gap-3 font-medium opacity-90 hover:opacity-100 hover:bg-white/10 w-full p-2 rounded text-left">
+                    <i class="fas fa-file-export w-6"></i> Export Routines (JSON)
+                </button>
+                <button onclick="triggerImport()" class="flex items-center gap-3 font-medium opacity-90 hover:opacity-100 hover:bg-white/10 w-full p-2 rounded text-left">
+                    <i class="fas fa-file-import w-6"></i> Import Routines
+                </button>
+                <input type="file" id="import-input" class="hidden" accept=".json" onchange="importRoutines(this)">
+            </div>
+        </div>
+
+        <div class="mt-auto p-4 space-y-6 pb-8">
+            <a href="#" class="flex items-center gap-4 font-medium opacity-90"><i class="fas fa-chart-line w-6"></i> Stats</a>
+            <a href="#" class="flex items-center gap-4 font-medium opacity-90"><i class="fas fa-cog w-6"></i> Settings</a>
+        </div>
+    </div>
+
+    <div id="dashboard-view" class="view-section active relative">
+        <header class="bg-[#E53935] text-white pt-4 pb-6 px-4 rounded-b-3xl shadow-lg z-10 relative">
+            <div class="flex justify-between items-center mb-4 relative">
+                <button onclick="toggleSidebar(true)" class="p-2 -ml-2 active:bg-white/20 rounded-full transition-colors">
+                    <i class="fas fa-bars text-xl"></i>
+                </button>
+                <h1 class="text-lg font-medium absolute left-1/2 -translate-x-1/2" id="current-routine-title">My routine</h1>
+                <div class="w-8"></div>
+            </div>
+
+            <div class="flex justify-between items-center px-2">
+                <div class="flex flex-col items-center w-1/3">
+                    <i class="fas fa-caret-up cursor-pointer p-2 active:text-gray-200" onclick="adjustGlobalBPM(1)"></i>
+                    <span class="text-xl font-bold" id="global-bpm-display">120 BPM</span>
+                    <i class="fas fa-caret-down cursor-pointer p-2 active:text-gray-200" onclick="adjustGlobalBPM(-1)"></i>
+                </div>
+                <div class="w-1/3 flex justify-center">
+                    <button id="global-play-btn" class="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center border-4 border-white/30 backdrop-blur-sm active:scale-95 transition-transform" onclick="handleGlobalPlayClick()">
+                        <i class="fas fa-play text-3xl text-white pl-1" id="global-play-icon"></i>
+                    </button>
+                </div>
+                <div class="flex flex-col items-center w-1/3">
+                    <span class="text-2xl font-bold">1/4</span>
+                </div>
+            </div>
+            
+            <div class="mt-6 text-center relative px-2">
+                <p class="text-sm opacity-90 italic">Practice Time <span id="global-practice-timer">0:00</span> / <span id="total-routine-time">0:00</span></p>
+                <div class="absolute right-0 bottom-0 flex items-center gap-2">
+                    <label class="flex items-center gap-1 text-xs bg-black/10 px-2 py-1 rounded cursor-pointer hover:bg-black/20 transition-colors">
+                        <input type="checkbox" id="autoplay-toggle" checked onchange="toggleAutoplay(this.checked)" class="accent-white w-3 h-3">
+                        <span class="font-medium text-white/90">Autoplay</span>
+                    </label>
+                    <button onclick="resetRoutine()" class="bg-white/20 text-xs px-2 py-1 rounded hover:bg-white/30 font-medium">RESET</button>
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto p-4 space-y-4 pb-24" id="exercise-list"></main>
+
+        <button onclick="toggleModal(true)" class="fixed bottom-6 right-6 w-14 h-14 bg-[#E53935] text-white rounded-full shadow-xl flex items-center justify-center text-2xl active:scale-90 transition-transform z-20">
+            <i class="fas fa-plus"></i>
+        </button>
+    </div>
+
+    <div id="details-view" class="view-section bg-[#F5F5F5] overflow-y-auto">
+        <div class="bg-[#E53935] text-white p-4 pt-6 pb-4 shadow-md flex justify-between items-center sticky top-0 z-20">
+            <button onclick="closeDetailsView()" class="text-xl p-2 -ml-2"><i class="fas fa-arrow-left"></i></button>
+            <h2 class="text-lg font-medium">Details</h2>
+            
+            <div class="relative">
+                <button id="details-menu-btn" onclick="toggleDetailsMenu(event)" class="p-2 -mr-2 active:bg-white/20 rounded-full">
+                    <i class="fas fa-ellipsis-v text-xl"></i>
+                </button>
+                <div id="details-menu-dropdown" class="hidden absolute right-0 top-10 bg-white rounded-lg shadow-xl w-48 py-2 z-50 text-gray-700 transform origin-top-right transition-all">
+                    <button onclick="duplicateExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3"><i class="far fa-copy text-gray-400"></i> Duplicate</button>
+                    <button onclick="archiveExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3"><i class="fas fa-box-archive text-gray-400"></i> Archive</button>
+                    <button onclick="deleteDetailExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-red-500"><i class="far fa-trash-alt"></i> Delete</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 space-y-4 pb-10">
+            <div class="bg-white rounded-xl p-6 shadow-sm">
+                <h2 id="detail-title" class="text-2xl text-gray-800 mb-2 font-normal">Title</h2>
+                <p class="text-gray-500 mb-6">Practice Time: <span id="detail-time-display">0:00</span></p>
+                <div class="flex gap-3">
+                    <button onclick="resetCurrentDetailExercise()" class="flex-1 py-3 text-[#E53935] border border-red-100 bg-red-50 rounded-lg font-medium shadow-sm active:scale-95 transition-transform">Reset</button>
+                    <button id="detail-play-btn" onclick="toggleDetailPlay()" class="flex-1 py-3 text-[#E53935] border border-gray-100 bg-white rounded-lg font-medium shadow-lg shadow-red-50 active:scale-95 transition-transform">Start</button>
+                    <button onclick="completeDetailExercise()" class="flex-1 py-3 text-[#E53935] border border-gray-100 bg-white rounded-lg font-medium shadow-sm active:scale-95 transition-transform">Complete</button>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl p-4 shadow-sm space-y-6">
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-700">Minutes</span>
+                    <div class="flex items-center gap-3">
+                        <button class="w-8 h-8 rounded-full border border-gray-300 text-gray-500 flex items-center justify-center" onclick="adjustDetailTime('min', -1)">-</button>
+                        <span class="font-medium w-16 text-center" id="detail-min-display">10 min</span>
+                        <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935] flex items-center justify-center" onclick="adjustDetailTime('min', 1)">+</button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-700">Seconds</span>
+                    <div class="flex items-center gap-3">
+                        <button class="w-8 h-8 rounded-full border border-gray-300 text-gray-500 flex items-center justify-center" onclick="adjustDetailTime('sec', -5)">-</button>
+                        <span class="font-medium w-16 text-center" id="detail-sec-display">00 sec</span>
+                        <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935] flex items-center justify-center" onclick="adjustDetailTime('sec', 5)">+</button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-700">Tempo</span>
+                    <div class="flex items-center gap-3">
+                        <button class="w-8 h-8 rounded-full border border-gray-300 text-gray-500 flex items-center justify-center" onclick="adjustDetailBPM(-5)">-</button>
+                        <span class="font-medium w-16 text-center" id="detail-bpm">120 BPM</span>
+                        <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935] flex items-center justify-center" onclick="adjustDetailBPM(5)">+</button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-700">Metronome Auto-Start</span>
+                    <input type="checkbox" id="detail-autostart" class="w-5 h-5 accent-[#E53935]" onchange="updateDetailAutoStart(this.checked)">
+                </div>
+                <div class="flex justify-between items-center pt-2 border-t border-gray-50 text-sm">
+                    <span class="text-gray-500">Routine</span>
+                    <span class="text-gray-900" id="detail-routine-name">My routine</span>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl p-4 shadow-sm">
+                <p class="text-gray-700 font-medium mb-2">Comment</p>
+                <textarea id="detail-comment" class="w-full text-sm text-gray-600 border-none outline-none resize-none bg-transparent" rows="3" placeholder="Add notes..." oninput="updateComment(this.value)"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div id="create-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4 transition-opacity">
+        <div class="bg-white w-full max-w-sm rounded-xl shadow-2xl transform transition-all scale-95">
+            <div class="p-4 border-b border-gray-100">
+                <input type="text" id="new-title" placeholder="Exercise title" class="text-xl w-full outline-none text-gray-700">
+            </div>
+            <div class="p-6 space-y-6">
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-700">Tempo</span>
+                    <div class="flex items-center gap-3">
+                        <button class="w-8 h-8 rounded-full border border-gray-300 text-gray-500" onclick="adjustNewBPM(-5)">-</button>
+                        <span class="font-medium w-20 text-center" id="new-bpm-display">100 BPM</span>
+                        <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935]" onclick="adjustNewBPM(5)">+</button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-700">Minutes</span>
+                    <div class="flex items-center gap-3">
+                        <button class="w-8 h-8 rounded-full border border-gray-300 text-gray-500" onclick="adjustNewTime('min', -1)">-</button>
+                        <span class="font-medium w-20 text-center" id="new-min-display">2 min</span>
+                        <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935]" onclick="adjustNewTime('min', 1)">+</button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-700">Seconds</span>
+                    <div class="flex items-center gap-3">
+                        <button class="w-8 h-8 rounded-full border border-gray-300 text-gray-500" onclick="adjustNewTime('sec', -5)">-</button>
+                        <span class="font-medium w-20 text-center" id="new-sec-display">00 sec</span>
+                        <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935]" onclick="adjustNewTime('sec', 5)">+</button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-700">Metronome Auto-Start</span>
+                    <input type="checkbox" id="new-autostart" checked class="w-5 h-5 accent-[#E53935]">
+                </div>
+                <div class="flex justify-end gap-2 pt-4">
+                    <button onclick="toggleModal(false)" class="px-4 py-2 text-gray-500">Cancel</button>
+                    <button onclick="addNewExercise()" class="px-6 py-2 bg-[#E53935] text-white rounded shadow-md font-medium">create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- DATA & STATE ---
+        const initialExercises = [
+            { id: 1, title: 'One Minutes Change C - G', bpm: 80, durationSec: 60, remainingSec: 10, completed: false, autoStart: true, archived: false },
+            { id: 2, title: 'Arpeggios', bpm: 80, durationSec: 120, remainingSec: 120, completed: false, autoStart: false, archived: false },
+            { id: 3, title: 'Improvisations', bpm: 120, durationSec: 600, remainingSec: 600, completed: false, autoStart: true, archived: false }
+        ];
+
+        let state = {
+            isPlaying: false,
+            bpm: 120,
+            globalSeconds: 0,
+            activeExerciseId: null,
+            exerciseRemaining: 0,
+            viewingExerciseId: null,
+            autoplayRoutine: true,
+            routines: [{ id: 'default', name: 'Rutina 1', exercises: JSON.parse(JSON.stringify(initialExercises)) }],
+            currentRoutineId: 'default',
+            newExerciseForm: { bpm: 100, min: 2, sec: 0 }
+        };
+
+        const STORAGE_KEY = 'musicRoutineApp_v4';
+
+        function saveData() {
+            if(state.activeExerciseId) {
+                const ex = getExerciseById(state.activeExerciseId);
+                if(ex) ex.remainingSec = state.exerciseRemaining;
+            }
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                routines: state.routines,
+                currentRoutineId: state.currentRoutineId
+            }));
+        }
+
+        function loadData() {
+            const data = localStorage.getItem(STORAGE_KEY);
+            if (data) {
+                try {
+                    const parsed = JSON.parse(data);
+                    state.routines = parsed.routines;
+                    state.currentRoutineId = parsed.currentRoutineId || 'default';
+                    state.routines.forEach(r => r.exercises.forEach(ex => {
+                        if (ex.durationSec === undefined && ex.duration !== undefined) { ex.durationSec = ex.duration * 60; delete ex.duration; }
+                        if (ex.remainingSec === undefined) ex.remainingSec = ex.durationSec;
+                        if (ex.autoStart === undefined) ex.autoStart = true;
+                        if (ex.archived === undefined) ex.archived = false;
+                    }));
+                } catch (e) { console.error("Error loading data", e); }
+            }
+        }
+
+        let sortableInstance;
+        window.onload = function() {
+            loadData();
+            const listEl = document.getElementById('exercise-list');
+            sortableInstance = new Sortable(listEl, {
+                animation: 150, delay: 300, delayOnTouchOnly: true, touchStartThreshold: 5,
+                ghostClass: 'sortable-ghost', dragClass: 'sortable-drag', handle: '.draggable-item',
+                onEnd: function (evt) {
+                    const routine = getCurrentRoutine();
+                    const item = routine.exercises.splice(evt.oldIndex, 1)[0];
+                    routine.exercises.splice(evt.newIndex, 0, item);
+                    saveData();
+                }
+            });
+            updateUI();
+        };
+
+        // --- CORE LOGIC ---
+        function handleGlobalPlayClick() {
+            if (state.isPlaying) pauseSequence();
+            else state.activeExerciseId ? resumeSequence() : startFirstExercise();
+        }
+
+        function toggleListExercise(id) {
+            // Toggle Logic: 
+            // Si es el mismo y está sonando -> Pausar.
+            // En cualquier otro caso (es otro o está pausado) -> Play.
+            if (state.activeExerciseId === id && state.isPlaying) {
+                pauseSequence();
+            } else {
+                playExercise(id);
+            }
+        }
+
+        function startFirstExercise() {
+            const routine = getCurrentRoutine();
+            const activeExercises = routine.exercises.filter(e => !e.archived);
+            const nextEx = activeExercises.find(e => !e.completed) || activeExercises[0];
+            if (nextEx) playExercise(nextEx.id);
+        }
+
+        function playExercise(id) {
+            const ex = getExerciseById(id); 
+            if (!ex) return;
+
+            if (state.activeExerciseId && state.activeExerciseId !== id) {
+                const prev = getExerciseById(state.activeExerciseId);
+                if(prev) prev.remainingSec = state.exerciseRemaining;
+            }
+
+            state.activeExerciseId = id;
+            if (ex.remainingSec === undefined || ex.remainingSec <= 0) {
+                state.exerciseRemaining = ex.durationSec;
+            } else {
+                state.exerciseRemaining = ex.remainingSec;
+            }
+
+            state.bpm = ex.bpm;
+            state.isPlaying = true;
+            
+            updateUI(); 
+            initAudio();
+            ex.autoStart ? startMetronomeAudio() : stopMetronomeAudio();
+            saveData();
+        }
+
+        function pauseSequence() {
+            if (state.activeExerciseId) {
+                const ex = getExerciseById(state.activeExerciseId);
+                if(ex) ex.remainingSec = state.exerciseRemaining;
+            }
+            state.isPlaying = false; 
+            stopMetronomeAudio(); 
+            saveData();
+            updateUI();
+        }
+
+        function resumeSequence() {
+            const ex = getExerciseById(state.activeExerciseId);
+            state.exerciseRemaining = ex.remainingSec;
+            state.isPlaying = true; 
+            initAudio();
+            ex.autoStart ? startMetronomeAudio() : stopMetronomeAudio();
+            updateUI();
+        }
+
+        function handleExerciseCompletion() {
+            state.isPlaying = false; 
+            stopMetronomeAudio();
+            const ex = getExerciseById(state.activeExerciseId);
+            if(ex) { ex.completed = true; ex.remainingSec = 0; }
+            playBellSound();
+            saveData();
+            updateUI(); 
+            if (state.autoplayRoutine) {
+                const routine = getCurrentRoutine();
+                const activeList = routine.exercises.filter(e => !e.archived);
+                const idx = activeList.findIndex(e => e.id === state.activeExerciseId);
+                if (idx < activeList.length - 1) setTimeout(() => playExercise(activeList[idx+1].id), 1500);
+                else finishRoutine();
+            }
+        }
+        
+        function finishRoutine() { state.isPlaying = false; state.activeExerciseId = null; state.exerciseRemaining = 0; updateUI(); alert("Routine finished!"); }
+        function resetRoutineLogic() {
+            pauseSequence(); state.activeExerciseId = null; state.exerciseRemaining = 0; state.globalSeconds = 0;
+            getCurrentRoutine().exercises.forEach(e => { e.completed = false; e.remainingSec = e.durationSec; });
+            saveData(); updateUI();
+        }
+        function resetCurrentDetailExercise() {
+             const id = state.viewingExerciseId; const ex = getExerciseById(id);
+             if(ex) {
+                 ex.remainingSec = ex.durationSec; ex.completed = false;
+                 if(state.activeExerciseId === id) { pauseSequence(); state.exerciseRemaining = ex.durationSec; }
+                 saveData(); updateDetailsUI();
+             }
+        }
+
+        // --- UI & RENDER (CORREGIDO: PROGRESS BAR PERMANENTE) ---
+        function renderExercises() {
+            const list = document.getElementById('exercise-list'); list.innerHTML = '';
+            const currentRoutine = getCurrentRoutine(); if(!currentRoutine) return;
+            const visibleExercises = currentRoutine.exercises.filter(e => !e.archived);
+            const totalSec = visibleExercises.reduce((acc, curr) => acc + curr.durationSec, 0);
+            document.getElementById('total-routine-time').innerText = formatTime(totalSec);
+
+            visibleExercises.forEach(ex => {
+                const isActive = ex.id === state.activeExerciseId;
+                
+                // LÓGICA DE TEXTO BOTÓN: ¿Está realmente sonando este ejercicio?
+                const isActuallyPlaying = isActive && state.isPlaying;
+                
+                // LÓGICA DE PROGRESO: Siempre visible, basado en memoria o estado activo
+                let progressPercent = 0;
+                // Si es el activo, usamos la variable volatil del timer, sino la guardada
+                const currentRemaining = isActive ? state.exerciseRemaining : ex.remainingSec;
+                let timeText = `${formatTime(currentRemaining)}/${formatTime(ex.durationSec)}`;
+                
+                if (ex.completed) { 
+                    progressPercent = 100; 
+                    timeText = `${formatTime(ex.durationSec)}/${formatTime(ex.durationSec)}`; 
+                } else { 
+                    // Evitar división por cero
+                    if(ex.durationSec > 0) {
+                        progressPercent = ((ex.durationSec - currentRemaining) / ex.durationSec) * 100;
+                    }
+                }
+
+                const startBtnClass = isActuallyPlaying 
+                    ? "bg-[#E53935] text-white border-none" // Stop (Rojo)
+                    : "bg-white text-[#E53935] border border-red-100 shadow-sm"; // Start (Blanco)
+
+                const el = document.createElement('div');
+                el.className = `draggable-item rounded-xl relative overflow-hidden transition-all shadow-sm border border-gray-100 mb-4 ${ex.completed ? 'bg-[#D1FAE5] border-green-200' : isActive ? 'bg-[#E0F2F1] border-green-100 scale-[1.02]' : 'bg-white'}`;
+                
+                // NOTA: La barra de progreso se renderiza SIEMPRE, ya no depende de isActive
+                el.innerHTML = `
+                    <div class="absolute inset-0 bg-[rgba(0,200,83,0.2)] z-0 progress-bar-fill" style="width: ${progressPercent}%"></div>
+                    
+                    <div class="flex items-center justify-between relative z-10">
+                        <div class="flex items-center gap-4 flex-1 p-4" onclick="${!ex.completed ? `toggleListExercise(${ex.id})` : ''}">
+                            <div class="w-16 h-14 rounded-lg flex items-center justify-center font-bold text-lg transition-colors z-20 ${ex.completed ? 'bg-[#10B981] text-white' : startBtnClass}">
+                                ${ex.completed ? '<i class="fas fa-check"></i>' : isActuallyPlaying ? 'Stop' : 'Start'}
+                            </div>
+                            <div class="flex-1">
+                                <h3 class="font-medium text-gray-800 ${ex.completed ? 'text-green-800' : ''}">${ex.title}</h3>
+                                <p class="text-xs ${isActive ? 'font-bold' : 'text-gray-400'} mt-1 flex items-center gap-2">
+                                    ${timeText} <span class="bg-black/5 px-1.5 rounded">${ex.bpm} BPM</span> ${!ex.autoStart ? '<i class="fas fa-volume-mute"></i>' : ''}
+                                </p>
+                            </div>
+                        </div>
+                        <div class="py-8 px-5 text-gray-300 hover:text-[#E53935]" onpointerdown="event.stopPropagation()" onclick="openDetailsView(${ex.id})"><i class="fas fa-chevron-right"></i></div>
+                    </div>`;
+                list.appendChild(el);
+            });
+        }
+
+        // --- GLOBAL LOOP ---
+        setInterval(() => {
+            if (state.isPlaying) {
+                state.globalSeconds++;
+                document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
+                if (state.activeExerciseId && state.exerciseRemaining > 0) {
+                    state.exerciseRemaining--;
+                    const ex = getExerciseById(state.activeExerciseId);
+                    if(ex) ex.remainingSec = state.exerciseRemaining; 
+                    renderExercises();
+                    if(state.viewingExerciseId === state.activeExerciseId) document.getElementById('detail-time-display').innerText = formatTime(state.exerciseRemaining);
+                } else if (state.activeExerciseId && state.exerciseRemaining <= 0) {
+                    handleExerciseCompletion();
+                }
+            }
+        }, 1000);
+
+        // --- STANDARD HELPERS ---
+        function formatTime(s) { const m = Math.floor(s/60); const sec = s%60; return `${m}:${sec.toString().padStart(2, '0')}`; }
+        function getCurrentRoutine() { return state.routines.find(r => r.id === state.currentRoutineId); }
+        function getExerciseById(id) { return getCurrentRoutine().exercises.find(e => e.id === id); }
+        function updateUI() { renderExercises(); document.getElementById('global-bpm-display').innerText = `${state.bpm} BPM`; document.getElementById('global-play-icon').className = state.isPlaying ? "fas fa-pause text-3xl" : "fas fa-play text-3xl pl-1"; document.getElementById('current-routine-title').innerText = getCurrentRoutine().name; }
+        
+        // (El resto de funciones se mantienen idénticas para asegurar compatibilidad)
+        function openDetailsView(id) {
+            state.viewingExerciseId = id; const ex = getExerciseById(id);
+            document.getElementById('detail-title').innerText = ex.title;
+            document.getElementById('detail-bpm').innerText = `${ex.bpm} BPM`;
+            document.getElementById('detail-min-display').innerText = `${Math.floor(ex.durationSec / 60)} min`;
+            document.getElementById('detail-sec-display').innerText = `${(ex.durationSec % 60).toString().padStart(2, '0')} sec`;
+            document.getElementById('detail-autostart').checked = ex.autoStart;
+            document.getElementById('detail-routine-name').innerText = getCurrentRoutine().name;
+            document.getElementById('detail-comment').value = ex.comment || "";
+            document.getElementById('details-menu-dropdown').classList.add('hidden');
+            document.getElementById('dashboard-view').classList.remove('active');
+            document.getElementById('details-view').classList.add('active');
+            const displayTime = (state.activeExerciseId === id) ? state.exerciseRemaining : ex.remainingSec;
+            document.getElementById('detail-time-display').innerText = formatTime(displayTime);
+            updateDetailsUI();
+        }
+        function updateDetailsUI() { const btn = document.getElementById('detail-play-btn'); const active = state.activeExerciseId === state.viewingExerciseId && state.isPlaying; btn.innerText = active ? "Pause" : "Start"; btn.className = active ? "flex-1 py-3 text-white bg-[#E53935] rounded-lg" : "flex-1 py-3 text-[#E53935] bg-white border rounded-lg"; }
+        function toggleSidebar(s) { document.getElementById('sidebar-menu').classList.toggle('-translate-x-full', !s); document.getElementById('sidebar-overlay').classList.toggle('hidden', !s); renderSidebarRoutines(); }
+        function renderSidebarRoutines() { const l=document.getElementById('routine-list-container'); l.innerHTML=''; state.routines.forEach(r=>{ const li=document.createElement('li'); li.className="flex justify-between items-center p-2 hover:bg-white/10 rounded group"; li.innerHTML=`<span onclick="switchRoutine('${r.id}')" class="flex-1 cursor-pointer ${r.id===state.currentRoutineId?'font-bold bg-white/20':''}">${r.name}</span><div class="flex items-center gap-3 opacity-80 group-hover:opacity-100"><button onclick="renameRoutine('${r.id}')"><i class="fas fa-pencil-alt text-xs"></i></button><button onclick="deleteRoutine('${r.id}')"><i class="fas fa-trash text-xs"></i></button></div>`; l.appendChild(li); }); }
+        function deleteRoutine(id) { if(state.routines.length<=1)return alert("Cannot delete only routine."); if(confirm("Delete?")){ state.routines.splice(state.routines.findIndex(r=>r.id===id),1); if(state.currentRoutineId===id)switchRoutine(state.routines[0].id); else renderSidebarRoutines(); saveData(); } }
+        function renameRoutine(id) { const r=state.routines.find(r=>r.id===id); const n=prompt("Rename:", r.name); if(n){ r.name=n; saveData(); renderSidebarRoutines(); if(state.currentRoutineId===id)updateUI(); } }
+        function switchRoutine(id) { pauseSequence(); state.currentRoutineId=id; saveData(); toggleSidebar(false); updateUI(); }
+        function showAddRoutineInput() { const n=prompt("New Routine Name:"); if(n){ state.routines.push({id:Date.now().toString(),name:n,exercises:[]}); saveData(); renderSidebarRoutines(); } }
+        function toggleModal(s) { document.getElementById('create-modal').classList.toggle('hidden',!s); }
+        function adjustGlobalBPM(v) { state.bpm=Math.max(1,Math.min(300,state.bpm+v)); updateUI(); }
+        function toggleDetailPlay() { state.activeExerciseId===state.viewingExerciseId && state.isPlaying ? pauseSequence() : playExercise(state.viewingExerciseId); updateDetailsUI(); }
+        function closeDetailsView() { state.viewingExerciseId=null; document.getElementById('details-view').classList.remove('active'); document.getElementById('dashboard-view').classList.add('active'); updateUI(); }
+        function adjustDetailBPM(v) { const ex=getExerciseById(state.viewingExerciseId); ex.bpm=Math.max(1,ex.bpm+v); document.getElementById('detail-bpm').innerText=`${ex.bpm} BPM`; saveData(); if(state.activeExerciseId===ex.id){state.bpm=ex.bpm; updateUI();} }
+        function updateDetailAutoStart(c) { const ex=getExerciseById(state.viewingExerciseId); ex.autoStart=c; saveData(); if(state.activeExerciseId===ex.id && state.isPlaying) c?startMetronomeAudio():stopMetronomeAudio(); }
+        function adjustNewBPM(v) { state.newExerciseForm.bpm+=v; document.getElementById('new-bpm-display').innerText=`${state.newExerciseForm.bpm} BPM`; }
+        function resetRoutine() { resetRoutineLogic(); updateUI(); }
+        function toggleAutoplay(c) { state.autoplayRoutine=c; }
+        function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); }
+        function completeDetailExercise() { const ex=getExerciseById(state.viewingExerciseId); ex.completed=true; ex.remainingSec=0; saveData(); closeDetailsView(); }
+        function toggleDetailsMenu(e) { e.stopPropagation(); document.getElementById('details-menu-dropdown').classList.toggle('hidden'); }
+        function handleWindowClick(e) { const m=document.getElementById('details-menu-dropdown'); const b=document.getElementById('details-menu-btn'); if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden'); }
+        function duplicateExercise() { const o=getExerciseById(state.viewingExerciseId); if(!o)return; const c=JSON.parse(JSON.stringify(o)); c.id=Date.now(); c.title+=" (Copy)"; c.completed=false; c.remainingSec=c.durationSec; const r=getCurrentRoutine(); const i=r.exercises.findIndex(e=>e.id===o.id); r.exercises.splice(i+1,0,c); saveData(); closeDetailsView(); }
+        function archiveExercise() { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; if(confirm("Archive?")){ ex.archived=true; saveData(); closeDetailsView(); } }
+        function deleteDetailExercise() { const r=getCurrentRoutine(); if(!confirm("Delete?"))return; const i=r.exercises.findIndex(e=>e.id===state.viewingExerciseId); if(i>-1){ r.exercises.splice(i,1); saveData(); closeDetailsView(); } }
+        function showArchivedCount() { alert(`Archived: ${getCurrentRoutine().exercises.filter(e=>e.archived).length}`); }
+        function exportRoutines() { const d=JSON.stringify(state.routines,null,2); const b=new Blob([d],{type:"application/json"}); const u=URL.createObjectURL(b); const a=document.body.appendChild(document.createElement('a')); a.href=u; a.download=`backup_${new Date().toISOString().split('T')[0]}.json`; a.click(); URL.revokeObjectURL(u); }
+        function triggerImport() { document.getElementById('import-input').click(); }
+        function importRoutines(input) { const f=input.files[0]; if(!f)return; const r=new FileReader(); r.onload=(e)=>{ try{ const j=JSON.parse(e.target.result); if(Array.isArray(j)){ if(confirm("Overwrite?")){ j.forEach(r=>r.exercises.forEach(e=>{ if(e.durationSec===undefined && e.duration!==undefined){e.durationSec=e.duration*60;delete e.duration;} if(e.remainingSec===undefined)e.remainingSec=e.durationSec; if(e.autoStart===undefined)e.autoStart=true; if(e.archived===undefined)e.archived=false; })); state.routines=j; saveData(); resetRoutineLogic(); updateUI(); toggleSidebar(false); } } }catch(err){alert("Invalid file");} }; r.readAsText(f); input.value=''; }
+        function adjustDetailTime(type,val) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; let total=ex.durationSec; if(type==='min') total=Math.max(0,total+(val*60)); else total=Math.max(0,total+val); ex.durationSec=total; ex.remainingSec=total; saveData(); document.getElementById('detail-min-display').innerText=`${Math.floor(total/60)} min`; document.getElementById('detail-sec-display').innerText=`${(total%60).toString().padStart(2,'0')} sec`; }
+        function adjustNewTime(type,val) { if(type==='min') state.newExerciseForm.min=Math.max(0,state.newExerciseForm.min+val); else state.newExerciseForm.sec=Math.max(0,state.newExerciseForm.sec+val); document.getElementById('new-min-display').innerText=`${state.newExerciseForm.min} min`; document.getElementById('new-sec-display').innerText=`${state.newExerciseForm.sec.toString().padStart(2,'0')} sec`; }
+        function addNewExercise() { const t=document.getElementById('new-title').value; if(!t)return; const total=(state.newExerciseForm.min*60)+state.newExerciseForm.sec; getCurrentRoutine().exercises.push({id:Date.now(),title:t,bpm:state.newExerciseForm.bpm,durationSec:total,remainingSec:total,completed:false,autoStart:document.getElementById('new-autostart').checked,archived:false}); saveData(); toggleModal(false); updateUI(); }
+
+        const AudioContext = window.AudioContext||window.webkitAudioContext; let audioCtx,nextTime=0,timer,beat=0;
+        function initAudio() { if(!audioCtx)audioCtx=new AudioContext(); if(audioCtx.state==='suspended')audioCtx.resume(); }
+        function playOsc(t) { const o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value=beat===0?1000:800; g.gain.setValueAtTime(beat===0?1:0.6,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.1); o.start(t); o.stop(t+0.1); }
+        function playBellSound() { if(!audioCtx)initAudio(); const n=audioCtx.currentTime; const o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.setValueAtTime(880,n); o.frequency.exponentialRampToValueAtTime(880,n+1.5); g.gain.setValueAtTime(0.3,n); g.gain.exponentialRampToValueAtTime(0.001,n+1.5); o.start(n); o.stop(n+1.5); }
+        function scheduler() { while(nextTime<audioCtx.currentTime+0.1) { playOsc(nextTime); nextTime+=60/state.bpm; setTimeout(()=>beat=(beat+1)%4,(nextTime-audioCtx.currentTime)*1000); } timer=setTimeout(scheduler,25); }
+        function startMetronomeAudio() { if(!timer){ beat=0; nextTime=audioCtx.currentTime+0.05; scheduler(); }}
+        function stopMetronomeAudio() { clearTimeout(timer); timer=null; }
+    </script>
+</body>
+</html>
