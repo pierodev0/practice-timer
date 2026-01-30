@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Music Routine App v21 - Robust Import</title>
+    <title>Music Routine App v24 - Dashboard Previews</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
@@ -46,6 +46,11 @@
     </style>
 </head>
 <body class="overflow-hidden" onclick="handleWindowClick(event)">
+
+    <div id="image-lightbox" class="fixed inset-0 bg-black/95 z-[100] hidden flex items-center justify-center p-2 cursor-zoom-out animate-fade-in" onclick="closeImageModal()">
+        <img id="lightbox-img" src="" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-transform duration-300 transform scale-95">
+        <button class="absolute top-4 right-4 text-white text-4xl opacity-80 hover:opacity-100">&times;</button>
+    </div>
 
     <div id="sidebar-overlay" onclick="toggleSidebar(false)" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden transition-opacity"></div>
     
@@ -172,7 +177,6 @@
                         <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935] flex items-center justify-center" onclick="adjustDetailReps(1)">+</button>
                     </div>
                 </div>
-
                 <div class="flex justify-between items-center">
                     <span class="text-gray-700">Minutes</span>
                     <div class="flex items-center gap-3">
@@ -189,7 +193,6 @@
                         <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935] flex items-center justify-center" onclick="adjustDetailTime('sec', 5)">+</button>
                     </div>
                 </div>
-
                 <div class="flex justify-between items-center">
                     <span class="text-gray-700">Tempo</span>
                     <div class="flex items-center gap-3">
@@ -198,21 +201,20 @@
                         <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935] flex items-center justify-center" onclick="adjustDetailBPM(5)">+</button>
                     </div>
                 </div>
-
                 <div class="flex justify-between items-center">
                     <span class="text-gray-700">Metronome Auto-Start</span>
                     <input type="checkbox" id="detail-autostart" class="w-5 h-5 accent-[#E53935]" onchange="updateDetailAutoStart(this.checked)">
                 </div>
-
                 <div class="flex justify-between items-center pt-2 border-t border-gray-50 text-sm">
                     <span class="text-gray-500">Routine</span>
                     <span class="text-gray-900" id="detail-routine-name">My routine</span>
                 </div>
             </div>
 
-            <div class="bg-white rounded-xl p-4 shadow-sm">
+            <div class="bg-white rounded-xl p-4 shadow-sm pb-8">
                 <p class="text-gray-700 font-medium mb-2">Comment</p>
-                <textarea id="detail-comment" class="w-full text-sm text-gray-600 border-none outline-none resize-none bg-transparent" rows="3" placeholder="Add notes..." oninput="updateComment(this.value)"></textarea>
+                <textarea id="detail-comment" class="w-full text-sm text-gray-600 border-none outline-none resize-none bg-transparent mb-2" rows="3" placeholder="Add notes (paste image links here)..." oninput="updateComment(this.value)"></textarea>
+                <div id="detail-image-preview" class="flex flex-wrap gap-2 mt-2"></div>
             </div>
         </div>
     </div>
@@ -231,7 +233,6 @@
                         <button class="w-8 h-8 rounded-full border border-[#E53935] text-[#E53935]" onclick="adjustNewReps(1)">+</button>
                     </div>
                 </div>
-
                 <div class="flex justify-between items-center">
                     <span class="text-gray-700">Tempo</span>
                     <div class="flex items-center gap-3">
@@ -271,26 +272,20 @@
     <script>
         // --- DATA & STATE ---
         const initialExercises = [
-            { id: 1, title: 'OMC (Demo 10s)', bpm: 80, durationSec: 10, remainingSec: 10, completed: false, autoStart: true, archived: false, reps: 3, currentRep: 1 },
-            { id: 2, title: 'Arpeggios', bpm: 80, durationSec: 120, remainingSec: 120, completed: false, autoStart: false, archived: false, reps: 1, currentRep: 1 },
-            { id: 3, title: 'Improvisations', bpm: 120, durationSec: 600, remainingSec: 600, completed: false, autoStart: true, archived: false, reps: 1, currentRep: 1 }
+            { id: 1, title: 'OMC (Demo 10s)', bpm: 80, durationSec: 10, remainingSec: 10, completed: false, autoStart: true, archived: false, reps: 3, currentRep: 1, comment: "Example: https://img.notionusercontent.com/s3/prod-files-secure%2Fbcbdab33-aec6-43be-9e0a-e424262fde34%2F9fe893b7-37d8-4dc8-9162-7490e0275f69%2Fimage.png/size/w=2000?exp=1769752669&sig=4RrCTSORdFK2fDIPXTUjoNu8RvLtJI44sMbhw_cG4BQ&id=2ba07a6e-c7ed-8023-8a93-e0296ab07557&table=block&userId=078dfb6a-9587-4188-9a35-a4eec027e309" },
+            { id: 2, title: 'Arpeggios', bpm: 80, durationSec: 120, remainingSec: 120, completed: false, autoStart: false, archived: false, reps: 1, currentRep: 1, comment: "" }
         ];
 
         let state = {
-            isExercisePlaying: false,
-            isAudioOn: false,
-            bpm: 120,
-            globalSeconds: 0,
-            activeExerciseId: null,
-            exerciseRemaining: 0,
-            viewingExerciseId: null,
+            isExercisePlaying: false, isAudioOn: false, bpm: 120, globalSeconds: 0,
+            activeExerciseId: null, exerciseRemaining: 0, viewingExerciseId: null,
             autoplayRoutine: true,
             routines: [{ id: 'default', name: 'Rutina 1', exercises: JSON.parse(JSON.stringify(initialExercises)) }],
             currentRoutineId: 'default',
             newExerciseForm: { bpm: 100, min: 2, sec: 0, reps: 1 }
         };
 
-        const STORAGE_KEY = 'musicRoutineApp_v8';
+        const STORAGE_KEY = 'musicRoutineApp_v11';
 
         function saveData() {
             if(state.activeExerciseId) {
@@ -310,215 +305,20 @@
                     const parsed = JSON.parse(data);
                     state.routines = parsed.routines;
                     state.currentRoutineId = parsed.currentRoutineId || 'default';
+                    // Migrations (omitted for brevity, assume valid structure or run robust import)
                 } catch (e) { console.error("Error loading data", e); }
             }
         }
 
-        // --- ROBUST IMPORT LOGIC (SANITIZER) ---
-        function importRoutines(input) {
-            const f = input.files[0];
-            if (!f) return;
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const json = JSON.parse(e.target.result);
-                    
-                    if (!Array.isArray(json)) throw new Error("Invalid file structure");
-
-                    if (!confirm("Overwrite all routines?")) {
-                        input.value = '';
-                        return;
-                    }
-
-                    // Sanitize Data: Fill missing new fields
-                    const cleanRoutines = json.map(r => {
-                        return {
-                            id: r.id || Date.now().toString(),
-                            name: r.name || "Imported Routine",
-                            exercises: Array.isArray(r.exercises) ? r.exercises.map(ex => {
-                                // Duration migration
-                                let dur = ex.durationSec;
-                                if(dur === undefined && ex.duration !== undefined) dur = ex.duration * 60;
-                                if(dur === undefined) dur = 120; // Default
-
-                                return {
-                                    id: ex.id || Date.now(),
-                                    title: ex.title || "Untitled",
-                                    bpm: ex.bpm || 100,
-                                    durationSec: dur,
-                                    remainingSec: (ex.remainingSec !== undefined) ? ex.remainingSec : dur,
-                                    completed: !!ex.completed,
-                                    autoStart: (ex.autoStart !== undefined) ? ex.autoStart : true,
-                                    archived: !!ex.archived,
-                                    reps: (ex.reps !== undefined) ? ex.reps : 1,
-                                    currentRep: (ex.currentRep !== undefined) ? ex.currentRep : 1,
-                                    comment: ex.comment || ""
-                                };
-                            }) : []
-                        };
-                    });
-
-                    state.routines = cleanRoutines;
-                    state.currentRoutineId = state.routines[0]?.id || 'default';
-                    
-                    saveData();
-                    resetRoutineLogic();
-                    updateUI();
-                    toggleSidebar(false);
-                    alert("Import successful!");
-
-                } catch (err) {
-                    alert("Error importing file: " + err.message);
-                }
-            };
-            reader.readAsText(f);
-            input.value = '';
+        // --- IMAGE HELPERS ---
+        function getFirstImage(text) {
+            if(!text) return null;
+            const urlRegex = /(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/i;
+            const match = text.match(urlRegex);
+            return match ? match[0] : null;
         }
 
-        let sortableInstance;
-        window.onload = function() {
-            loadData();
-            const listEl = document.getElementById('exercise-list');
-            sortableInstance = new Sortable(listEl, {
-                animation: 150, delay: 300, delayOnTouchOnly: true, handle: '.draggable-item',
-                onEnd: function (evt) {
-                    const routine = getCurrentRoutine();
-                    const item = routine.exercises.splice(evt.oldIndex, 1)[0];
-                    routine.exercises.splice(evt.newIndex, 0, item);
-                    saveData();
-                }
-            });
-            updateUI();
-        };
-
-        // --- GLOBAL AUDIO TOGGLE ---
-        function toggleGlobalAudioOnly() {
-            state.isAudioOn = !state.isAudioOn;
-            if (state.isAudioOn) { initAudio(); startMetronomeAudio(); } 
-            else { stopMetronomeAudio(); }
-            updateUI();
-        }
-
-        function adjustGlobalBPM(val) {
-            state.bpm = Math.max(1, Math.min(300, state.bpm + val));
-            if(state.activeExerciseId) {
-                const ex = getExerciseById(state.activeExerciseId);
-                if(ex) ex.bpm = state.bpm;
-            }
-            updateUI();
-        }
-
-        // --- ROUTINE LOGIC ---
-        function toggleListExercise(id) {
-            if (state.activeExerciseId === id && state.isExercisePlaying) pauseSequence();
-            else playExercise(id);
-        }
-
-        function playExercise(id) {
-            const ex = getExerciseById(id); if (!ex) return;
-            
-            if (state.activeExerciseId && state.activeExerciseId !== id) {
-                const prev = getExerciseById(state.activeExerciseId);
-                if(prev) prev.remainingSec = state.exerciseRemaining;
-            }
-
-            state.activeExerciseId = id;
-            if (ex.remainingSec === undefined || ex.remainingSec <= 0) state.exerciseRemaining = ex.durationSec;
-            else state.exerciseRemaining = ex.remainingSec;
-
-            state.bpm = ex.bpm;
-            state.isExercisePlaying = true;
-            
-            initAudio();
-            if (ex.autoStart) {
-                state.isAudioOn = true;
-                startMetronomeAudio();
-            } else {
-                state.isAudioOn = false;
-                stopMetronomeAudio();
-            }
-            
-            updateUI();
-            saveData();
-        }
-
-        function pauseSequence() {
-            if (state.activeExerciseId) {
-                const ex = getExerciseById(state.activeExerciseId);
-                if(ex) ex.remainingSec = state.exerciseRemaining;
-            }
-            state.isExercisePlaying = false;
-            state.isAudioOn = false;
-            stopMetronomeAudio();
-            saveData();
-            updateUI();
-        }
-
-        function handleExerciseCompletion() {
-            const ex = getExerciseById(state.activeExerciseId);
-            if (!ex) return;
-
-            playBellSound();
-
-            if (ex.currentRep < ex.reps) {
-                ex.currentRep++;
-                state.exerciseRemaining = ex.durationSec;
-                ex.remainingSec = ex.durationSec;
-                updateUI();
-                saveData();
-            } else {
-                state.isExercisePlaying = false;
-                state.isAudioOn = false;
-                stopMetronomeAudio();
-                ex.completed = true;
-                ex.remainingSec = 0;
-                saveData();
-                updateUI();
-
-                if (state.autoplayRoutine) {
-                    const routine = getCurrentRoutine();
-                    const activeList = routine.exercises.filter(e => !e.archived);
-                    const idx = activeList.findIndex(e => e.id === state.activeExerciseId);
-                    if (idx < activeList.length - 1) setTimeout(() => playExercise(activeList[idx+1].id), 1500);
-                    else finishRoutine();
-                }
-            }
-        }
-        
-        function finishRoutine() {
-             state.isExercisePlaying = false; state.isAudioOn = false; stopMetronomeAudio(); state.activeExerciseId = null; updateUI(); alert("Routine finished!");
-        }
-
-        setInterval(() => {
-            if (state.isExercisePlaying) {
-                state.globalSeconds++;
-                document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
-                
-                if (state.activeExerciseId && state.exerciseRemaining > 0) {
-                    state.exerciseRemaining--;
-                    const ex = getExerciseById(state.activeExerciseId);
-                    if(ex) ex.remainingSec = state.exerciseRemaining; 
-                    renderExercises();
-                    if(state.viewingExerciseId === state.activeExerciseId) {
-                        document.getElementById('detail-time-display').innerText = formatTime(state.exerciseRemaining);
-                    }
-                } else if (state.activeExerciseId && state.exerciseRemaining <= 0) {
-                    handleExerciseCompletion();
-                }
-            }
-        }, 1000);
-
-        function updateUI() {
-            renderExercises();
-            document.getElementById('global-bpm-display').innerText = `${state.bpm} BPM`;
-            document.getElementById('current-routine-title').innerText = getCurrentRoutine().name;
-            const icon = document.getElementById('global-play-icon');
-            const btn = document.getElementById('global-play-btn');
-            if (state.isAudioOn) { icon.className = "fas fa-pause text-3xl text-white"; btn.classList.add('bg-white/40'); } 
-            else { icon.className = "fas fa-play text-3xl text-white pl-1"; btn.classList.remove('bg-white/40'); }
-        }
-
+        // --- RENDER EXERCISES (WITH PREVIEW) ---
         function renderExercises() {
             const list = document.getElementById('exercise-list'); list.innerHTML = '';
             const currentRoutine = getCurrentRoutine(); if(!currentRoutine) return;
@@ -539,6 +339,14 @@
                 const autoIcon = !ex.autoStart ? '<i class="fas fa-volume-mute text-xs ml-2 text-gray-400"></i>' : '';
                 const startBtnClass = isTimerRunning ? "bg-[#E53935] text-white border-none" : "bg-white text-[#E53935] border border-red-100 shadow-sm";
 
+                // --- NEW IMAGE PREVIEW LOGIC ---
+                const imgUrl = getFirstImage(ex.comment);
+                const imgHtml = imgUrl ? `
+                    <div class="ml-2 flex-shrink-0">
+                        <img src="${imgUrl}" class="w-12 h-12 object-cover rounded border border-gray-200 bg-gray-50 shadow-sm cursor-zoom-in hover:opacity-80 transition" onclick="event.stopPropagation(); openImageModal('${imgUrl}')" onerror="this.style.display='none'">
+                    </div>
+                ` : '';
+
                 const el = document.createElement('div');
                 el.className = `draggable-item rounded-xl relative overflow-hidden transition-all shadow-sm border border-gray-100 mb-4 ${ex.completed ? 'bg-[#D1FAE5] border-green-200' : isActive ? 'bg-[#E0F2F1] border-green-100 scale-[1.02]' : 'bg-white'}`;
                 el.innerHTML = `
@@ -548,8 +356,8 @@
                             <div class="w-16 h-14 rounded-lg flex items-center justify-center font-bold text-lg transition-colors z-20 ${ex.completed ? 'bg-[#10B981] text-white' : startBtnClass}">
                                 ${ex.completed ? '<i class="fas fa-check"></i>' : isTimerRunning ? 'Stop' : 'Start'}
                             </div>
-                            <div class="flex-1">
-                                <h3 class="font-medium text-gray-800 ${ex.completed ? 'text-green-800' : ''}">${ex.title}</h3>
+                            <div class="flex-1 min-w-0">
+                                <h3 class="font-medium text-gray-800 ${ex.completed ? 'text-green-800' : ''} truncate">${ex.title}</h3>
                                 <div class="flex items-center mt-1">
                                     <p class="text-xs ${isActive ? 'font-bold' : 'text-gray-400'} flex items-center gap-2">
                                         ${timeText} <span class="bg-black/5 px-1.5 rounded font-normal text-gray-500">${ex.bpm} BPM</span> ${autoIcon}
@@ -557,6 +365,7 @@
                                     ${repsBadge}
                                 </div>
                             </div>
+                            ${imgHtml}
                         </div>
                         <div class="py-8 px-5 text-gray-300 hover:text-[#E53935]" onpointerdown="event.stopPropagation()" onclick="openDetailsView(${ex.id})"><i class="fas fa-chevron-right"></i></div>
                     </div>`;
@@ -564,7 +373,159 @@
             });
         }
 
-        // --- AUDIO ENGINE ---
+        // --- IMAGE MODAL LOGIC (REUSED) ---
+        function renderCommentImages(text) {
+            const container = document.getElementById('detail-image-preview');
+            container.innerHTML = '';
+            if (!text) return;
+            const urlRegex = /(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/ig;
+            const matches = text.match(urlRegex);
+            if (matches) {
+                matches.forEach(url => {
+                    const img = document.createElement('img');
+                    img.src = url;
+                    img.className = "w-20 h-20 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition shadow-sm bg-gray-50";
+                    img.onclick = () => openImageModal(url);
+                    img.onerror = () => img.style.display = 'none';
+                    container.appendChild(img);
+                });
+            }
+        }
+        function openImageModal(url) {
+            const modal = document.getElementById('image-lightbox');
+            const img = document.getElementById('lightbox-img');
+            img.src = url;
+            modal.classList.remove('hidden');
+            setTimeout(() => img.classList.remove('scale-95'), 10);
+        }
+        function closeImageModal() {
+            const modal = document.getElementById('image-lightbox');
+            const img = document.getElementById('lightbox-img');
+            img.classList.add('scale-95');
+            setTimeout(() => modal.classList.add('hidden'), 200);
+        }
+
+        // --- INIT & SORTABLE ---
+        let sortableInstance;
+        window.onload = function() {
+            loadData();
+            const listEl = document.getElementById('exercise-list');
+            sortableInstance = new Sortable(listEl, {
+                animation: 150, delay: 300, delayOnTouchOnly: true, handle: '.draggable-item',
+                onEnd: function (evt) {
+                    const routine = getCurrentRoutine();
+                    const item = routine.exercises.splice(evt.oldIndex, 1)[0];
+                    routine.exercises.splice(evt.newIndex, 0, item);
+                    saveData();
+                }
+            });
+            updateUI();
+        };
+
+        // --- RESTO DE FUNCIONES (Igual a v23) ---
+        function importRoutines(input) {
+            const f = input.files[0]; if (!f) return;
+            const r = new FileReader();
+            r.onload = (e) => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    if (!Array.isArray(json)) throw new Error("Invalid structure");
+                    if (!confirm("Overwrite all routines?")) { input.value = ''; return; }
+                    const cleanRoutines = json.map(r => ({
+                        id: r.id || Date.now().toString(), name: r.name || "Imported",
+                        exercises: Array.isArray(r.exercises) ? r.exercises.map(ex => {
+                            let dur = ex.durationSec;
+                            if(dur === undefined && ex.duration !== undefined) dur = ex.duration * 60;
+                            if(dur === undefined) dur = 120;
+                            return {
+                                id: ex.id || Date.now(), title: ex.title || "Untitled", bpm: ex.bpm || 100,
+                                durationSec: dur, remainingSec: (ex.remainingSec!==undefined)?ex.remainingSec:dur,
+                                completed: !!ex.completed, autoStart: (ex.autoStart!==undefined)?ex.autoStart:true,
+                                archived: !!ex.archived, reps: ex.reps||1, currentRep: ex.currentRep||1, comment: ex.comment||""
+                            };
+                        }) : []
+                    }));
+                    state.routines = cleanRoutines; state.currentRoutineId = state.routines[0]?.id || 'default';
+                    saveData(); resetRoutineLogic(); updateUI(); toggleSidebar(false); alert("Import successful!");
+                } catch (err) { alert("Error: " + err.message); }
+            };
+            r.readAsText(f); input.value = '';
+        }
+
+        function toggleGlobalAudioOnly() {
+            state.isAudioOn = !state.isAudioOn;
+            if (state.isAudioOn) { initAudio(); startMetronomeAudio(); } else { stopMetronomeAudio(); }
+            updateUI();
+        }
+        function adjustGlobalBPM(val) {
+            state.bpm = Math.max(1, Math.min(300, state.bpm + val));
+            if(state.activeExerciseId) { const ex = getExerciseById(state.activeExerciseId); if(ex) ex.bpm = state.bpm; }
+            updateUI();
+        }
+        function toggleListExercise(id) {
+            if (state.activeExerciseId === id && state.isExercisePlaying) pauseSequence(); else playExercise(id);
+        }
+        function playExercise(id) {
+            const ex = getExerciseById(id); if (!ex) return;
+            if (state.activeExerciseId && state.activeExerciseId !== id) {
+                const prev = getExerciseById(state.activeExerciseId); if(prev) prev.remainingSec = state.exerciseRemaining;
+            }
+            state.activeExerciseId = id;
+            state.exerciseRemaining = (ex.remainingSec === undefined || ex.remainingSec <= 0) ? ex.durationSec : ex.remainingSec;
+            state.bpm = ex.bpm; state.isExercisePlaying = true;
+            initAudio();
+            if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); } else { state.isAudioOn = false; stopMetronomeAudio(); }
+            updateUI(); saveData();
+        }
+        function pauseSequence() {
+            if (state.activeExerciseId) { const ex = getExerciseById(state.activeExerciseId); if(ex) ex.remainingSec = state.exerciseRemaining; }
+            state.isExercisePlaying = false; state.isAudioOn = false; stopMetronomeAudio(); saveData(); updateUI();
+        }
+        function handleExerciseCompletion() {
+            const ex = getExerciseById(state.activeExerciseId); if (!ex) return;
+            playBellSound();
+            if (ex.currentRep < ex.reps) {
+                ex.currentRep++; state.exerciseRemaining = ex.durationSec; ex.remainingSec = ex.durationSec;
+                updateUI(); saveData();
+            } else {
+                state.isExercisePlaying = false; state.isAudioOn = false; stopMetronomeAudio();
+                ex.completed = true; ex.remainingSec = 0; saveData(); updateUI();
+                if (state.autoplayRoutine) {
+                    const routine = getCurrentRoutine();
+                    const activeList = routine.exercises.filter(e => !e.archived);
+                    const idx = activeList.findIndex(e => e.id === state.activeExerciseId);
+                    if (idx < activeList.length - 1) setTimeout(() => playExercise(activeList[idx+1].id), 1500);
+                    else finishRoutine();
+                }
+            }
+        }
+        function finishRoutine() { state.isExercisePlaying = false; state.isAudioOn = false; stopMetronomeAudio(); state.activeExerciseId = null; updateUI(); alert("Routine finished!"); }
+
+        setInterval(() => {
+            if (state.isExercisePlaying) {
+                state.globalSeconds++;
+                document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
+                if (state.activeExerciseId && state.exerciseRemaining > 0) {
+                    state.exerciseRemaining--;
+                    const ex = getExerciseById(state.activeExerciseId); if(ex) ex.remainingSec = state.exerciseRemaining; 
+                    renderExercises();
+                    if(state.viewingExerciseId === state.activeExerciseId) document.getElementById('detail-time-display').innerText = formatTime(state.exerciseRemaining);
+                } else if (state.activeExerciseId && state.exerciseRemaining <= 0) {
+                    handleExerciseCompletion();
+                }
+            }
+        }, 1000);
+
+        function updateUI() {
+            renderExercises();
+            document.getElementById('global-bpm-display').innerText = `${state.bpm} BPM`;
+            document.getElementById('current-routine-title').innerText = getCurrentRoutine().name;
+            const icon = document.getElementById('global-play-icon');
+            const btn = document.getElementById('global-play-btn');
+            if (state.isAudioOn) { icon.className = "fas fa-pause text-3xl text-white"; btn.classList.add('bg-white/40'); } 
+            else { icon.className = "fas fa-play text-3xl text-white pl-1"; btn.classList.remove('bg-white/40'); }
+        }
+
         const AudioContext = window.AudioContext||window.webkitAudioContext; let audioCtx,nextTime=0,timer,beat=0;
         function initAudio() { if(!audioCtx)audioCtx=new AudioContext(); if(audioCtx.state==='suspended')audioCtx.resume(); }
         function playOsc(t) { const o=audioCtx.createOscillator(),g=audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value=beat===0?1000:800; g.gain.setValueAtTime(beat===0?1:0.6,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.1); o.start(t); o.stop(t+0.1); }
@@ -573,15 +534,32 @@
         function startMetronomeAudio() { if(!timer){ beat=0; nextTime=audioCtx.currentTime+0.05; scheduler(); }}
         function stopMetronomeAudio() { clearTimeout(timer); timer=null; }
 
-        // --- Helpers ---
         function formatTime(s) { const m = Math.floor(s/60); const sec = s%60; return `${m}:${sec.toString().padStart(2, '0')}`; }
         function getCurrentRoutine() { return state.routines.find(r => r.id === state.currentRoutineId); }
         function getExerciseById(id) { return getCurrentRoutine().exercises.find(e => e.id === id); }
-        function openDetailsView(id) { state.viewingExerciseId = id; const ex = getExerciseById(id); document.getElementById('detail-title').innerText = ex.title; document.getElementById('detail-bpm').innerText = `${ex.bpm} BPM`; document.getElementById('detail-min-display').innerText = `${Math.floor(ex.durationSec / 60)} min`; document.getElementById('detail-sec-display').innerText = `${(ex.durationSec % 60).toString().padStart(2, '0')} sec`; document.getElementById('detail-autostart').checked = ex.autoStart; document.getElementById('detail-routine-name').innerText = getCurrentRoutine().name; document.getElementById('detail-comment').value = ex.comment || ""; document.getElementById('detail-reps-display').innerText = ex.reps; document.getElementById('detail-reps-indicator').innerText = `Rep ${ex.currentRep}/${ex.reps}`; document.getElementById('details-menu-dropdown').classList.add('hidden'); document.getElementById('dashboard-view').classList.remove('active'); document.getElementById('details-view').classList.add('active'); const displayTime = (state.activeExerciseId === id) ? state.exerciseRemaining : ex.remainingSec; document.getElementById('detail-time-display').innerText = formatTime(displayTime); updateDetailsUI(); }
+        function openDetailsView(id) {
+            state.viewingExerciseId = id; const ex = getExerciseById(id);
+            document.getElementById('detail-title').innerText = ex.title;
+            document.getElementById('detail-bpm').innerText = `${ex.bpm} BPM`;
+            document.getElementById('detail-min-display').innerText = `${Math.floor(ex.durationSec / 60)} min`;
+            document.getElementById('detail-sec-display').innerText = `${(ex.durationSec % 60).toString().padStart(2, '0')} sec`;
+            document.getElementById('detail-autostart').checked = ex.autoStart;
+            document.getElementById('detail-routine-name').innerText = getCurrentRoutine().name;
+            document.getElementById('detail-comment').value = ex.comment || "";
+            document.getElementById('detail-reps-display').innerText = ex.reps;
+            document.getElementById('detail-reps-indicator').innerText = `Rep ${ex.currentRep}/${ex.reps}`;
+            document.getElementById('details-menu-dropdown').classList.add('hidden');
+            document.getElementById('dashboard-view').classList.remove('active');
+            document.getElementById('details-view').classList.add('active');
+            const displayTime = (state.activeExerciseId === id) ? state.exerciseRemaining : ex.remainingSec;
+            document.getElementById('detail-time-display').innerText = formatTime(displayTime);
+            renderCommentImages(ex.comment);
+            updateDetailsUI();
+        }
         function updateDetailsUI() { const btn = document.getElementById('detail-play-btn'); const active = state.activeExerciseId === state.viewingExerciseId && state.isExercisePlaying; btn.innerText = active ? "Pause" : "Start"; btn.className = active ? "flex-1 py-3 text-white bg-[#E53935] rounded-lg" : "flex-1 py-3 text-[#E53935] bg-white border rounded-lg"; }
         function toggleDetailPlay() { state.activeExerciseId===state.viewingExerciseId && state.isExercisePlaying ? pauseSequence() : playExercise(state.viewingExerciseId); updateDetailsUI(); }
+        function resetRoutine() { resetRoutineLogic(); updateUI(); }
         function resetRoutineLogic() { pauseSequence(); state.activeExerciseId = null; state.exerciseRemaining = 0; state.globalSeconds = 0; getCurrentRoutine().exercises.forEach(e => { e.completed = false; e.remainingSec = e.durationSec; e.currentRep = 1; }); saveData(); updateUI(); }
-        function resetRoutine() { resetRoutineLogic(); }
         function toggleSidebar(s) { document.getElementById('sidebar-menu').classList.toggle('-translate-x-full', !s); document.getElementById('sidebar-overlay').classList.toggle('hidden', !s); renderSidebarRoutines(); }
         function renderSidebarRoutines() { const l=document.getElementById('routine-list-container'); l.innerHTML=''; state.routines.forEach(r=>{ const li=document.createElement('li'); li.className="flex justify-between items-center p-2 hover:bg-white/10 rounded group"; li.innerHTML=`<span onclick="switchRoutine('${r.id}')" class="flex-1 cursor-pointer ${r.id===state.currentRoutineId?'font-bold bg-white/20':''}">${r.name}</span><div class="flex items-center gap-3 opacity-80 group-hover:opacity-100"><button onclick="renameRoutine('${r.id}')"><i class="fas fa-pencil-alt text-xs"></i></button><button onclick="deleteRoutine('${r.id}')"><i class="fas fa-trash text-xs"></i></button></div>`; l.appendChild(li); }); }
         function deleteRoutine(id) { if(state.routines.length<=1)return alert("Cannot delete only routine."); if(confirm("Delete?")){ state.routines.splice(state.routines.findIndex(r=>r.id===id),1); if(state.currentRoutineId===id)switchRoutine(state.routines[0].id); else renderSidebarRoutines(); saveData(); } }
@@ -589,6 +567,7 @@
         function switchRoutine(id) { pauseSequence(); state.currentRoutineId=id; saveData(); toggleSidebar(false); updateUI(); }
         function showAddRoutineInput() { const n=prompt("New Routine Name:"); if(n){ state.routines.push({id:Date.now().toString(),name:n,exercises:[]}); saveData(); renderSidebarRoutines(); } }
         function toggleModal(s) { document.getElementById('create-modal').classList.toggle('hidden',!s); }
+        function adjustGlobalBPM(v) { state.bpm=Math.max(1,Math.min(300,state.bpm+v)); updateUI(); }
         function adjustDetailBPM(v) { const ex=getExerciseById(state.viewingExerciseId); ex.bpm=Math.max(1,ex.bpm+v); document.getElementById('detail-bpm').innerText=`${ex.bpm} BPM`; saveData(); if(state.activeExerciseId===ex.id){state.bpm=ex.bpm; updateUI();} }
         function updateDetailAutoStart(c) { const ex=getExerciseById(state.viewingExerciseId); ex.autoStart=c; saveData(); if(state.activeExerciseId===ex.id && state.isExercisePlaying) { state.isAudioOn = c; c?startMetronomeAudio():stopMetronomeAudio(); updateUI(); } }
         function adjustNewBPM(v) { state.newExerciseForm.bpm+=v; document.getElementById('new-bpm-display').innerText=`${state.newExerciseForm.bpm} BPM`; }
@@ -596,7 +575,7 @@
         function adjustNewTime(type,val) { if(type==='min') state.newExerciseForm.min=Math.max(0,state.newExerciseForm.min+val); else state.newExerciseForm.sec=Math.max(0,state.newExerciseForm.sec+val); document.getElementById('new-min-display').innerText=`${state.newExerciseForm.min} min`; document.getElementById('new-sec-display').innerText=`${state.newExerciseForm.sec.toString().padStart(2,'0')} sec`; }
         function addNewExercise() { const t=document.getElementById('new-title').value; if(!t)return; const total=(state.newExerciseForm.min*60)+state.newExerciseForm.sec; getCurrentRoutine().exercises.push({id:Date.now(),title:t,bpm:state.newExerciseForm.bpm,durationSec:total,remainingSec:total,completed:false,autoStart:document.getElementById('new-autostart').checked,archived:false,reps:state.newExerciseForm.reps,currentRep:1}); saveData(); toggleModal(false); updateUI(); }
         function toggleAutoplay(c) { state.autoplayRoutine=c; }
-        function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); }
+        function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); renderCommentImages(v); }
         function adjustDetailReps(v) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; ex.reps=Math.max(1,ex.reps+v); if(ex.currentRep>ex.reps)ex.currentRep=1; saveData(); document.getElementById('detail-reps-display').innerText=ex.reps; document.getElementById('detail-reps-indicator').innerText=`Rep ${ex.currentRep}/${ex.reps}`; updateUI(); }
         function adjustDetailTime(type,val) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; let total=ex.durationSec; if(type==='min') total=Math.max(0,total+(val*60)); else total=Math.max(0,total+val); ex.durationSec=total; ex.remainingSec=total; saveData(); document.getElementById('detail-min-display').innerText=`${Math.floor(total/60)} min`; document.getElementById('detail-sec-display').innerText=`${(total%60).toString().padStart(2,'0')} sec`; }
         function resetCurrentDetailExercise() { const id=state.viewingExerciseId; const ex=getExerciseById(id); if(ex){ ex.remainingSec=ex.durationSec; ex.completed=false; ex.currentRep=1; if(state.activeExerciseId===id){ pauseSequence(); state.exerciseRemaining=ex.durationSec; } saveData(); updateDetailsUI(); } }
