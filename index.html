@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Music Routine App v26 - Editable Title</title>
+    <title>Music Routine App v28 - Smart Import</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
@@ -57,11 +57,16 @@
     <div id="sidebar-menu" class="fixed inset-y-0 left-0 w-72 bg-[#E53935] text-white z-50 transform -translate-x-full sidebar-transition flex flex-col shadow-2xl">
         <div class="p-4 pb-2">
              <h2 class="text-xl font-bold mb-4 px-2">My Routines</h2>
-            <ul id="routine-list-container" class="space-y-2 mb-4"></ul>
-            <div class="flex items-center justify-between mt-6 pt-4 border-t border-white/20" id="add-routine-section">
-                 <button onclick="showAddRoutineInput()" class="flex items-center gap-3 font-medium hover:bg-white/10 p-2 rounded w-full">
-                    <i class="fas fa-plus bg-white/20 p-1 rounded text-xs"></i> Add Routine
+            <ul id="routine-list-container" class="space-y-2 mb-4 overflow-y-auto max-h-[40vh]"></ul>
+            
+            <div class="flex items-center gap-2 mt-2 pt-4 border-t border-white/20" id="add-routine-section">
+                 <button onclick="showAddRoutineInput()" class="flex-1 flex items-center justify-center gap-2 font-medium hover:bg-white/10 p-2 rounded text-sm bg-black/10 transition-colors">
+                    <i class="fas fa-plus"></i> New
                 </button>
+                 <button onclick="triggerSmartImport()" class="flex-1 flex items-center justify-center gap-2 font-medium hover:bg-white/10 p-2 rounded text-sm bg-black/10 transition-colors">
+                    <i class="fas fa-file-import"></i> Import
+                </button>
+                <input type="file" id="import-smart-input" class="hidden" accept=".json" onchange="importSmartRoutines(this)">
             </div>
         </div>
         
@@ -72,15 +77,15 @@
         </div>
         
         <div class="p-4 border-b border-white/20">
-            <h3 class="text-sm uppercase text-white/60 font-bold mb-3 tracking-wider">Data Backup</h3>
+            <h3 class="text-xs uppercase text-white/60 font-bold mb-3 tracking-wider">Full System Backup</h3>
             <div class="space-y-2">
-                <button onclick="exportRoutines()" class="flex items-center gap-3 font-medium opacity-90 hover:opacity-100 hover:bg-white/10 w-full p-2 rounded text-left">
-                    <i class="fas fa-file-export w-6"></i> Export Routines (JSON)
+                <button onclick="exportRoutines()" class="flex items-center gap-3 font-medium opacity-90 hover:opacity-100 hover:bg-white/10 w-full p-2 rounded text-left text-sm">
+                    <i class="fas fa-save w-5"></i> Backup All (Export)
                 </button>
-                <button onclick="triggerImport()" class="flex items-center gap-3 font-medium opacity-90 hover:opacity-100 hover:bg-white/10 w-full p-2 rounded text-left">
-                    <i class="fas fa-file-import w-6"></i> Import Routines
+                <button onclick="triggerFullRestore()" class="flex items-center gap-3 font-medium opacity-90 hover:opacity-100 hover:bg-white/10 w-full p-2 rounded text-left text-sm text-red-100 hover:text-white">
+                    <i class="fas fa-exclamation-circle w-5"></i> Restore & Overwrite
                 </button>
-                <input type="file" id="import-input" class="hidden" accept=".json" onchange="importRoutines(this)">
+                <input type="file" id="import-full-input" class="hidden" accept=".json" onchange="restoreAllRoutines(this)">
             </div>
         </div>
 
@@ -96,7 +101,7 @@
                 <button onclick="toggleSidebar(true)" class="p-2 -ml-2 active:bg-white/20 rounded-full transition-colors">
                     <i class="fas fa-bars text-xl"></i>
                 </button>
-                <h1 class="text-lg font-medium absolute left-1/2 -translate-x-1/2" id="current-routine-title">My routine</h1>
+                <h1 class="text-lg font-medium absolute left-1/2 -translate-x-1/2 w-2/3 text-center truncate" id="current-routine-title">My routine</h1>
                 <div class="w-8"></div>
             </div>
 
@@ -321,15 +326,11 @@
             }
         }
 
-        // --- TITLE EDIT LOGIC (NUEVO) ---
         function updateExerciseTitle(newTitle) {
             const ex = getExerciseById(state.viewingExerciseId);
             if(ex) {
                 ex.title = newTitle;
                 saveData();
-                // Actualizar la lista en segundo plano si es posible, 
-                // pero como renderExercises reconstruye todo el DOM, podría cerrar la vista de detalles si no tenemos cuidado.
-                // En este diseño SPA simple, como el dashboard está oculto, podemos renderizar sin problemas.
                 renderExercises(); 
             }
         }
@@ -420,36 +421,161 @@
             updateUI();
         };
 
-        // --- STANDARD LOGIC ---
-        function importRoutines(input) {
+        // --- SMART IMPORT / EXPORT LOGIC ---
+        
+        // 1. HELPER: Clean and Prepare a Routine Object from JSON
+        function sanitizeImportedRoutine(r) {
+            // Generate a NEW ID to prevent conflicts with existing routines
+            const newId = Date.now().toString() + Math.floor(Math.random() * 1000).toString();
+            
+            // Map exercises and ensure structure
+            const exercises = Array.isArray(r.exercises) ? r.exercises.map(ex => {
+                let dur = ex.durationSec;
+                if(dur === undefined && ex.duration !== undefined) dur = ex.duration * 60;
+                if(dur === undefined) dur = 120;
+                
+                return {
+                    id: Date.now() + Math.floor(Math.random()*100000), // New ID for exercise
+                    title: ex.title || "Untitled", 
+                    bpm: ex.bpm || 100,
+                    durationSec: dur, 
+                    remainingSec: dur, // Reset progress
+                    completed: false, 
+                    autoStart: (ex.autoStart!==undefined)?ex.autoStart:true,
+                    archived: !!ex.archived, 
+                    reps: ex.reps||1, 
+                    currentRep: 1, 
+                    comment: ex.comment||""
+                };
+            }) : [];
+
+            return {
+                id: newId,
+                name: r.name ? r.name + " (Imported)" : "Imported Routine",
+                exercises: exercises
+            };
+        }
+
+        // 2. TRIGGER: Click the hidden file input
+        function triggerSmartImport() {
+            document.getElementById('import-smart-input').click();
+        }
+
+        // 3. MAIN LOGIC: Handle File Selection (Single OR Multiple)
+        function importSmartRoutines(input) {
+            const f = input.files[0]; if (!f) return;
+            const r = new FileReader();
+            
+            r.onload = (e) => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    let importedCount = 0;
+                    let routinesToAdd = [];
+
+                    // DETECT: Is it an Array (Multiple/Backup) or Object (Single)?
+                    if (Array.isArray(json)) {
+                        // It is a list of routines
+                        json.forEach(item => {
+                            if (item.exercises) {
+                                routinesToAdd.push(sanitizeImportedRoutine(item));
+                            }
+                        });
+                    } else if (typeof json === 'object' && json.exercises) {
+                        // It is a single routine object
+                        routinesToAdd.push(sanitizeImportedRoutine(json));
+                    } else {
+                        throw new Error("Invalid format. File must contain a routine object or an array of routines.");
+                    }
+
+                    if (routinesToAdd.length === 0) {
+                        throw new Error("No valid routines found in file.");
+                    }
+
+                    // ADD (Append) to state
+                    state.routines = [...state.routines, ...routinesToAdd];
+                    
+                    saveData();
+                    renderSidebarRoutines();
+                    // Keep sidebar open so user sees result
+                    toggleSidebar(true);
+                    
+                    alert(`Successfully imported ${routinesToAdd.length} routine(s).`);
+
+                } catch (err) { 
+                    alert("Import Failed: " + err.message); 
+                }
+            };
+            r.readAsText(f); 
+            input.value = ''; // Reset input so same file can be selected again if needed
+        }
+
+        // --- BACKUP & RESTORE (DESTRUCTIVE) ---
+        function triggerFullRestore() {
+            document.getElementById('import-full-input').click();
+        }
+
+        function restoreAllRoutines(input) {
             const f = input.files[0]; if (!f) return;
             const r = new FileReader();
             r.onload = (e) => {
                 try {
                     const json = JSON.parse(e.target.result);
-                    if (!Array.isArray(json)) throw new Error("Invalid structure");
-                    if (!confirm("Overwrite all routines?")) { input.value = ''; return; }
-                    const cleanRoutines = json.map(r => ({
-                        id: r.id || Date.now().toString(), name: r.name || "Imported",
-                        exercises: Array.isArray(r.exercises) ? r.exercises.map(ex => {
-                            let dur = ex.durationSec;
-                            if(dur === undefined && ex.duration !== undefined) dur = ex.duration * 60;
-                            if(dur === undefined) dur = 120;
-                            return {
-                                id: ex.id || Date.now(), title: ex.title || "Untitled", bpm: ex.bpm || 100,
-                                durationSec: dur, remainingSec: (ex.remainingSec!==undefined)?ex.remainingSec:dur,
-                                completed: !!ex.completed, autoStart: (ex.autoStart!==undefined)?ex.autoStart:true,
+                    if (!Array.isArray(json)) throw new Error("Invalid backup format. Backup must be an array.");
+                    if (!confirm("⚠️ WARNING: This will DELETE all current routines and replace them with the backup. Continue?")) { input.value = ''; return; }
+                    
+                    // Use the same sanitizer but keep original IDs if possible (optional, but safer to sanitize)
+                    const cleanRoutines = json.map(r => {
+                        // Minimal cleaning, trusting backup structure mostly
+                         return {
+                            id: r.id || Date.now().toString(), 
+                            name: r.name || "Restored",
+                            exercises: Array.isArray(r.exercises) ? r.exercises.map(ex => ({
+                                id: ex.id || Date.now(), 
+                                title: ex.title || "Untitled", bpm: ex.bpm || 100,
+                                durationSec: ex.durationSec || 60, remainingSec: ex.durationSec || 60,
+                                completed: !!ex.completed, autoStart: ex.autoStart!==undefined?ex.autoStart:true,
                                 archived: !!ex.archived, reps: ex.reps||1, currentRep: ex.currentRep||1, comment: ex.comment||""
-                            };
-                        }) : []
-                    }));
-                    state.routines = cleanRoutines; state.currentRoutineId = state.routines[0]?.id || 'default';
-                    saveData(); resetRoutineLogic(); updateUI(); toggleSidebar(false); alert("Import successful!");
-                } catch (err) { alert("Error: " + err.message); }
+                            })) : []
+                        };
+                    });
+
+                    state.routines = cleanRoutines; 
+                    state.currentRoutineId = state.routines[0]?.id || 'default';
+                    saveData(); 
+                    resetRoutineLogic(); 
+                    updateUI(); 
+                    toggleSidebar(false); 
+                    alert("System restored successfully!");
+                } catch (err) { alert("Restore Error: " + err.message); }
             };
             r.readAsText(f); input.value = '';
         }
 
+        // --- EXPORT FUNCTIONS ---
+        function exportRoutines() { 
+            const d=JSON.stringify(state.routines,null,2); 
+            downloadJSON(d, `backup_full_${new Date().toISOString().split('T')[0]}.json`);
+        }
+
+        function exportSingleRoutine(id) {
+            const routine = state.routines.find(r => r.id === id);
+            if(!routine) return;
+            const d = JSON.stringify(routine, null, 2);
+            const filename = routine.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            downloadJSON(d, `routine_${filename}.json`);
+        }
+
+        function downloadJSON(content, fileName) {
+            const b=new Blob([content],{type:"application/json"}); 
+            const u=URL.createObjectURL(b); 
+            const a=document.body.appendChild(document.createElement('a')); 
+            a.href=u; a.download=fileName; 
+            a.click(); 
+            URL.revokeObjectURL(u);
+            document.body.removeChild(a);
+        }
+
+        // --- AUDIO & UI HELPERS ---
         function toggleGlobalAudioOnly() {
             state.isAudioOn = !state.isAudioOn;
             if (state.isAudioOn) { initAudio(); startMetronomeAudio(); } else { stopMetronomeAudio(); }
@@ -631,13 +757,26 @@
         function resetRoutine() { resetRoutineLogic(); updateUI(); }
         function resetRoutineLogic() { pauseSequence(); state.activeExerciseId = null; state.exerciseRemaining = 0; state.globalSeconds = 0; getCurrentRoutine().exercises.forEach(e => { e.completed = false; e.remainingSec = e.durationSec; e.currentRep = 1; }); saveData(); updateUI(); }
         function toggleSidebar(s) { document.getElementById('sidebar-menu').classList.toggle('-translate-x-full', !s); document.getElementById('sidebar-overlay').classList.toggle('hidden', !s); renderSidebarRoutines(); }
-        function renderSidebarRoutines() { const l=document.getElementById('routine-list-container'); l.innerHTML=''; state.routines.forEach(r=>{ const li=document.createElement('li'); li.className="flex justify-between items-center p-2 hover:bg-white/10 rounded group"; li.innerHTML=`<span onclick="switchRoutine('${r.id}')" class="flex-1 cursor-pointer ${r.id===state.currentRoutineId?'font-bold bg-white/20':''}">${r.name}</span><div class="flex items-center gap-3 opacity-80 group-hover:opacity-100"><button onclick="renameRoutine('${r.id}')"><i class="fas fa-pencil-alt text-xs"></i></button><button onclick="deleteRoutine('${r.id}')"><i class="fas fa-trash text-xs"></i></button></div>`; l.appendChild(li); }); }
+        function renderSidebarRoutines() { 
+            const l=document.getElementById('routine-list-container'); l.innerHTML=''; 
+            state.routines.forEach(r=>{ 
+                const li=document.createElement('li'); 
+                li.className="flex justify-between items-center p-2 hover:bg-white/10 rounded group"; 
+                li.innerHTML=`
+                    <span onclick="switchRoutine('${r.id}')" class="flex-1 cursor-pointer truncate mr-2 ${r.id===state.currentRoutineId?'font-bold bg-white/20':''}">${r.name}</span>
+                    <div class="flex items-center gap-3 opacity-80 group-hover:opacity-100 flex-shrink-0">
+                        <button onclick="exportSingleRoutine('${r.id}')" title="Export Routine"><i class="fas fa-file-export text-xs"></i></button>
+                        <button onclick="renameRoutine('${r.id}')"><i class="fas fa-pencil-alt text-xs"></i></button>
+                        <button onclick="deleteRoutine('${r.id}')"><i class="fas fa-trash text-xs"></i></button>
+                    </div>`; 
+                l.appendChild(li); 
+            }); 
+        }
         function deleteRoutine(id) { if(state.routines.length<=1)return alert("Cannot delete only routine."); if(confirm("Delete?")){ state.routines.splice(state.routines.findIndex(r=>r.id===id),1); if(state.currentRoutineId===id)switchRoutine(state.routines[0].id); else renderSidebarRoutines(); saveData(); } }
         function renameRoutine(id) { const r=state.routines.find(r=>r.id===id); const n=prompt("Rename:", r.name); if(n){ r.name=n; saveData(); renderSidebarRoutines(); if(state.currentRoutineId===id)updateUI(); } }
         function switchRoutine(id) { pauseSequence(); state.currentRoutineId=id; saveData(); toggleSidebar(false); updateUI(); }
         function showAddRoutineInput() { const n=prompt("New Routine Name:"); if(n){ state.routines.push({id:Date.now().toString(),name:n,exercises:[]}); saveData(); renderSidebarRoutines(); } }
         function toggleModal(s) { document.getElementById('create-modal').classList.toggle('hidden',!s); }
-        function adjustGlobalBPM(v) { state.bpm=Math.max(1,Math.min(300,state.bpm+v)); updateUI(); }
         function adjustDetailBPM(v) { const ex=getExerciseById(state.viewingExerciseId); ex.bpm=Math.max(1,ex.bpm+v); document.getElementById('detail-bpm').innerText=`${ex.bpm} BPM`; saveData(); if(state.activeExerciseId===ex.id){state.bpm=ex.bpm; updateUI();} }
         function updateDetailAutoStart(c) { const ex=getExerciseById(state.viewingExerciseId); ex.autoStart=c; saveData(); if(state.activeExerciseId===ex.id && state.isExercisePlaying) { state.isAudioOn = c; c?startMetronomeAudio():stopMetronomeAudio(); updateUI(); } }
         function adjustNewBPM(v) { state.newExerciseForm.bpm+=v; document.getElementById('new-bpm-display').innerText=`${state.newExerciseForm.bpm} BPM`; }
@@ -656,7 +795,6 @@
         function archiveExercise() { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; if(confirm("Archive?")){ ex.archived=true; saveData(); closeDetailsView(); } }
         function deleteDetailExercise() { const r=getCurrentRoutine(); if(!confirm("Delete?"))return; const i=r.exercises.findIndex(e=>e.id===state.viewingExerciseId); if(i>-1){ r.exercises.splice(i,1); saveData(); closeDetailsView(); } }
         function showArchivedCount() { alert(`Archived: ${getCurrentRoutine().exercises.filter(e=>e.archived).length}`); }
-        function exportRoutines() { const d=JSON.stringify(state.routines,null,2); const b=new Blob([d],{type:"application/json"}); const u=URL.createObjectURL(b); const a=document.body.appendChild(document.createElement('a')); a.href=u; a.download=`backup_${new Date().toISOString().split('T')[0]}.json`; a.click(); URL.revokeObjectURL(u); }
         function triggerImport() { document.getElementById('import-input').click(); }
         function closeDetailsView() { state.viewingExerciseId=null; document.getElementById('details-view').classList.remove('active'); document.getElementById('dashboard-view').classList.add('active'); updateUI(); }
     </script>
