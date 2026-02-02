@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Music Routine App v28 - Smart Import</title>
+    <title>Music Routine App v33 - Reset Fix</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <style>
         :root {
             --primary-red: #E53935;
-            --primary-dark: #C62828;
             --bg-light: #F5F5F5;
             --active-mint: #E0F2F1;
             --completed-green: #D1FAE5;
@@ -37,17 +37,13 @@
         input[type=range]::-webkit-slider-runnable-track { height: 4px; background: #ddd; border-radius: 2px; }
 
         .sidebar-transition { transition: transform 0.3s ease-in-out; }
-        .sortable-ghost { opacity: 0.4; background-color: #ddd; border: 2px dashed #999; }
-        .sortable-drag { cursor: grabbing; opacity: 1; background: white; box-shadow: 0 10px 20px rgba(0,0,0,0.2); transform: scale(1.02); }
         .draggable-item { cursor: grab; }
-        .fade-enter { opacity: 0; transform: scale(0.95); }
-        .fade-enter-active { opacity: 1; transform: scale(1); transition: opacity 0.1s, transform 0.1s; }
         .progress-bar-fill { transition: width 0.3s linear; }
     </style>
 </head>
 <body class="overflow-hidden" onclick="handleWindowClick(event)">
 
-    <div id="image-lightbox" class="fixed inset-0 bg-black/95 z-[100] hidden flex items-center justify-center p-2 cursor-zoom-out animate-fade-in" onclick="closeImageModal()">
+    <div id="image-lightbox" class="fixed inset-0 bg-black/95 z-[100] hidden flex items-center justify-center p-2 cursor-zoom-out" onclick="closeImageModal()">
         <img id="lightbox-img" src="" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-transform duration-300 transform scale-95">
         <button class="absolute top-4 right-4 text-white text-4xl opacity-80 hover:opacity-100">&times;</button>
     </div>
@@ -90,7 +86,7 @@
         </div>
 
         <div class="mt-auto p-4 space-y-6 pb-8">
-            <a href="#" class="flex items-center gap-4 font-medium opacity-90"><i class="fas fa-chart-line w-6"></i> Stats</a>
+            <button onclick="openStatsView()" class="flex items-center gap-4 font-medium opacity-90 hover:opacity-100 w-full text-left"><i class="fas fa-chart-line w-6"></i> Stats & Progress</button>
             <a href="#" class="flex items-center gap-4 font-medium opacity-90"><i class="fas fa-cog w-6"></i> Settings</a>
         </div>
     </div>
@@ -123,12 +119,17 @@
             
             <div class="mt-6 text-center relative px-2">
                 <p class="text-sm opacity-90 italic">Practice Time <span id="global-practice-timer">0:00</span> / <span id="total-routine-time">0:00</span></p>
-                <div class="absolute right-0 bottom-0 flex items-center gap-2">
-                    <label class="flex items-center gap-1 text-xs bg-black/10 px-2 py-1 rounded cursor-pointer hover:bg-black/20 transition-colors">
+                <div class="absolute right-0 bottom-0 flex items-center justify-between w-full mt-2">
+                     <label class="flex items-center gap-1 text-xs bg-black/10 px-2 py-1 rounded cursor-pointer hover:bg-black/20 transition-colors">
                         <input type="checkbox" id="autoplay-toggle" checked onchange="toggleAutoplay(this.checked)" class="accent-white w-3 h-3">
                         <span class="font-medium text-white/90">Autoplay</span>
                     </label>
-                    <button onclick="resetRoutine()" class="bg-white/20 text-xs px-2 py-1 rounded hover:bg-white/30 font-medium">RESET</button>
+                    <div class="flex gap-2">
+                        <button onclick="finishAndResetRoutine()" class="bg-white text-[#E53935] text-xs px-3 py-1 rounded shadow-sm font-bold hover:bg-white/90 transition-colors">
+                            <i class="fas fa-flag-checkered mr-1"></i> FINISH
+                        </button>
+                        <button onclick="resetRoutine()" class="bg-white/20 text-xs px-2 py-1 rounded hover:bg-white/30 font-medium">RESET</button>
+                    </div>
                 </div>
             </div>
         </header>
@@ -144,19 +145,8 @@
         <div class="bg-[#E53935] text-white p-4 pt-6 pb-4 shadow-md flex justify-between items-center sticky top-0 z-20">
             <button onclick="closeDetailsView()" class="text-xl p-2 -ml-2"><i class="fas fa-arrow-left"></i></button>
             <h2 class="text-lg font-medium">Details</h2>
-            
-            <div class="relative">
-                <button id="details-menu-btn" onclick="toggleDetailsMenu(event)" class="p-2 -mr-2 active:bg-white/20 rounded-full">
-                    <i class="fas fa-ellipsis-v text-xl"></i>
-                </button>
-                <div id="details-menu-dropdown" class="hidden absolute right-0 top-10 bg-white rounded-lg shadow-xl w-48 py-2 z-50 text-gray-700 transform origin-top-right transition-all">
-                    <button onclick="duplicateExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3"><i class="far fa-copy text-gray-400"></i> Duplicate</button>
-                    <button onclick="archiveExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3"><i class="fas fa-box-archive text-gray-400"></i> Archive</button>
-                    <button onclick="deleteDetailExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-red-500"><i class="far fa-trash-alt"></i> Delete</button>
-                </div>
-            </div>
+            <div class="w-8"></div>
         </div>
-
         <div class="p-4 space-y-4 pb-10">
             <div class="bg-white rounded-xl p-6 shadow-sm">
                 <input type="text" id="detail-title-input" class="text-2xl text-gray-800 mb-2 font-normal w-full bg-transparent border-b border-transparent focus:border-[#E53935] outline-none transition-colors" value="Title" oninput="updateExerciseTitle(this.value)">
@@ -209,9 +199,16 @@
                     <span class="text-gray-700">Metronome Auto-Start</span>
                     <input type="checkbox" id="detail-autostart" class="w-5 h-5 accent-[#E53935]" onchange="updateDetailAutoStart(this.checked)">
                 </div>
-                <div class="flex justify-between items-center pt-2 border-t border-gray-50 text-sm">
-                    <span class="text-gray-500">Routine</span>
-                    <span class="text-gray-900" id="detail-routine-name">My routine</span>
+                
+                <div class="relative pt-4 border-t border-gray-100">
+                     <button id="details-menu-btn" onclick="toggleDetailsMenu(event)" class="flex items-center gap-2 text-gray-500 hover:text-[#E53935]">
+                        <i class="fas fa-cog"></i> Advanced Actions
+                    </button>
+                    <div id="details-menu-dropdown" class="hidden absolute left-0 top-12 bg-white rounded-lg shadow-xl w-48 py-2 z-50 text-gray-700 border border-gray-100">
+                        <button onclick="duplicateExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3"><i class="far fa-copy text-gray-400"></i> Duplicate</button>
+                        <button onclick="archiveExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3"><i class="fas fa-box-archive text-gray-400"></i> Archive</button>
+                        <button onclick="deleteDetailExercise()" class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-red-500"><i class="far fa-trash-alt"></i> Delete</button>
+                    </div>
                 </div>
             </div>
 
@@ -222,6 +219,41 @@
                 <div id="detail-attachments" class="mt-3 space-y-3">
                     <div id="detail-link-list" class="flex flex-col gap-2"></div>
                     <div id="detail-image-preview" class="flex flex-wrap gap-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="stats-view" class="view-section bg-[#F5F5F5] overflow-y-auto">
+        <div class="bg-[#E53935] text-white p-4 pt-6 pb-4 shadow-md flex justify-between items-center sticky top-0 z-20">
+            <button onclick="closeStatsView()" class="text-xl p-2 -ml-2"><i class="fas fa-arrow-left"></i></button>
+            <h2 class="text-lg font-medium">Professional Stats</h2>
+            <div class="w-8"></div>
+        </div>
+
+        <div class="p-4 space-y-6 pb-12">
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                    <div class="text-gray-500 text-xs uppercase font-bold mb-1">Total Practiced</div>
+                    <div class="text-2xl font-bold text-[#E53935]" id="stat-total-time">0h 0m</div>
+                </div>
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                    <div class="text-gray-500 text-xs uppercase font-bold mb-1">Streak</div>
+                    <div class="text-2xl font-bold text-gray-800"><span id="stat-streak">0</span> <span class="text-sm font-normal text-gray-500">days</span></div>
+                </div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="far fa-calendar-alt text-[#E53935]"></i> Last 7 Days (By Routine)</h3>
+                <div class="h-64">
+                    <canvas id="weeklyChart"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fas fa-chart-pie text-[#E53935]"></i> Focus Distribution</h3>
+                <div class="h-48 flex justify-center">
+                    <canvas id="routineChart"></canvas>
                 </div>
             </div>
         </div>
@@ -290,10 +322,12 @@
             autoplayRoutine: true,
             routines: [{ id: 'default', name: 'Rutina 1', exercises: JSON.parse(JSON.stringify(initialExercises)) }],
             currentRoutineId: 'default',
-            newExerciseForm: { bpm: 100, min: 2, sec: 0, reps: 1 }
+            newExerciseForm: { bpm: 100, min: 2, sec: 0, reps: 1 },
+            // Structure: { "2023-10-27": { totalSec: 300, routines: { "Routine A": 100, "Routine B": 200 } } }
+            stats: {}
         };
 
-        const STORAGE_KEY = 'musicRoutineApp_v13';
+        const STORAGE_KEY = 'musicRoutineApp_v31_stats';
 
         function saveData() {
             if(state.activeExerciseId) {
@@ -302,7 +336,8 @@
             }
             localStorage.setItem(STORAGE_KEY, JSON.stringify({
                 routines: state.routines,
-                currentRoutineId: state.currentRoutineId
+                currentRoutineId: state.currentRoutineId,
+                stats: state.stats
             }));
         }
 
@@ -313,6 +348,7 @@
                     const parsed = JSON.parse(data);
                     state.routines = parsed.routines;
                     state.currentRoutineId = parsed.currentRoutineId || 'default';
+                    state.stats = parsed.stats || {};
                     state.routines.forEach(r => r.exercises.forEach(ex => {
                         if (ex.durationSec === undefined && ex.duration !== undefined) { ex.durationSec = ex.duration * 60; delete ex.duration; }
                         if (ex.remainingSec === undefined) ex.remainingSec = ex.durationSec;
@@ -335,7 +371,23 @@
             }
         }
 
-        // --- URL HELPERS ---
+        // --- STATS TRACKING ---
+        function recordProgressSeconds(seconds) {
+            const today = new Date().toISOString().split('T')[0];
+            if (!state.stats[today]) {
+                state.stats[today] = { totalSec: 0, routines: {} };
+            }
+            state.stats[today].totalSec = Math.max(0, state.stats[today].totalSec + seconds);
+            const currentR = getCurrentRoutine();
+            if (currentR) {
+                if (!state.stats[today].routines[currentR.name]) {
+                    state.stats[today].routines[currentR.name] = 0;
+                }
+                state.stats[today].routines[currentR.name] = Math.max(0, state.stats[today].routines[currentR.name] + seconds);
+            }
+        }
+
+        // --- URL & ATTACHMENTS ---
         function getFirstUrl(text) {
             if (!text) return null;
             const urlRegex = /(https?:\/\/[^\s]+)/i;
@@ -350,15 +402,12 @@
             return match ? match[0] : null;
         }
 
-        // --- PARSING & RENDERING ATTACHMENTS ---
         function renderCommentAttachments(text) {
             const imgContainer = document.getElementById('detail-image-preview');
             const linkContainer = document.getElementById('detail-link-list');
             imgContainer.innerHTML = '';
             linkContainer.innerHTML = '';
-            
             if (!text) return;
-
             const imgRegex = /(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/ig;
             const images = text.match(imgRegex);
             if (images) {
@@ -371,7 +420,6 @@
                     imgContainer.appendChild(img);
                 });
             }
-
             const urlRegex = /(https?:\/\/[^\s]+)/ig;
             const allLinks = text.match(urlRegex);
             if (allLinks) {
@@ -404,7 +452,7 @@
             setTimeout(() => modal.classList.add('hidden'), 200);
         }
 
-        // --- INIT & SORTABLE ---
+        // --- INIT ---
         let sortableInstance;
         window.onload = function() {
             loadData();
@@ -421,98 +469,72 @@
             updateUI();
         };
 
-        // --- SMART IMPORT / EXPORT LOGIC ---
-        
-        // 1. HELPER: Clean and Prepare a Routine Object from JSON
-        function sanitizeImportedRoutine(r) {
-            // Generate a NEW ID to prevent conflicts with existing routines
-            const newId = Date.now().toString() + Math.floor(Math.random() * 1000).toString();
+        // --- FINISH ROUTINE LOGIC (NEW) ---
+        function finishAndResetRoutine() {
+            if(!confirm("Are you sure you want to finish this routine? This will reset all exercises for next time.")) return;
             
-            // Map exercises and ensure structure
+            // 1. Stop everything
+            pauseSequence();
+            
+            // 2. Reset logic
+            state.activeExerciseId = null; 
+            state.exerciseRemaining = 0; 
+            state.globalSeconds = 0; 
+            getCurrentRoutine().exercises.forEach(e => { 
+                e.completed = false; 
+                e.remainingSec = e.durationSec; 
+                e.currentRep = 1; 
+            }); 
+            
+            // 3. Save & UI
+            saveData(); 
+            updateUI(); 
+            
+            alert("Routine Completed! Great job!");
+        }
+
+        // --- IMPORT/EXPORT LOGIC ---
+        function sanitizeImportedRoutine(r) {
+            const newId = Date.now().toString() + Math.floor(Math.random() * 1000).toString();
             const exercises = Array.isArray(r.exercises) ? r.exercises.map(ex => {
                 let dur = ex.durationSec;
                 if(dur === undefined && ex.duration !== undefined) dur = ex.duration * 60;
                 if(dur === undefined) dur = 120;
-                
                 return {
-                    id: Date.now() + Math.floor(Math.random()*100000), // New ID for exercise
-                    title: ex.title || "Untitled", 
-                    bpm: ex.bpm || 100,
-                    durationSec: dur, 
-                    remainingSec: dur, // Reset progress
-                    completed: false, 
+                    id: Date.now() + Math.floor(Math.random()*100000), 
+                    title: ex.title || "Untitled", bpm: ex.bpm || 100,
+                    durationSec: dur, remainingSec: dur, completed: false, 
                     autoStart: (ex.autoStart!==undefined)?ex.autoStart:true,
-                    archived: !!ex.archived, 
-                    reps: ex.reps||1, 
-                    currentRep: 1, 
-                    comment: ex.comment||""
+                    archived: !!ex.archived, reps: ex.reps||1, currentRep: 1, comment: ex.comment||""
                 };
             }) : [];
-
-            return {
-                id: newId,
-                name: r.name ? r.name + " (Imported)" : "Imported Routine",
-                exercises: exercises
-            };
+            return { id: newId, name: r.name ? r.name + " (Imported)" : "Imported Routine", exercises: exercises };
         }
 
-        // 2. TRIGGER: Click the hidden file input
-        function triggerSmartImport() {
-            document.getElementById('import-smart-input').click();
-        }
+        function triggerSmartImport() { document.getElementById('import-smart-input').click(); }
 
-        // 3. MAIN LOGIC: Handle File Selection (Single OR Multiple)
         function importSmartRoutines(input) {
             const f = input.files[0]; if (!f) return;
             const r = new FileReader();
-            
             r.onload = (e) => {
                 try {
                     const json = JSON.parse(e.target.result);
-                    let importedCount = 0;
                     let routinesToAdd = [];
-
-                    // DETECT: Is it an Array (Multiple/Backup) or Object (Single)?
                     if (Array.isArray(json)) {
-                        // It is a list of routines
-                        json.forEach(item => {
-                            if (item.exercises) {
-                                routinesToAdd.push(sanitizeImportedRoutine(item));
-                            }
-                        });
+                        json.forEach(item => { if (item.exercises) routinesToAdd.push(sanitizeImportedRoutine(item)); });
                     } else if (typeof json === 'object' && json.exercises) {
-                        // It is a single routine object
                         routinesToAdd.push(sanitizeImportedRoutine(json));
-                    } else {
-                        throw new Error("Invalid format. File must contain a routine object or an array of routines.");
-                    }
-
-                    if (routinesToAdd.length === 0) {
-                        throw new Error("No valid routines found in file.");
-                    }
-
-                    // ADD (Append) to state
+                    } else { throw new Error("Invalid format."); }
+                    
+                    if (routinesToAdd.length === 0) throw new Error("No valid routines.");
                     state.routines = [...state.routines, ...routinesToAdd];
-                    
-                    saveData();
-                    renderSidebarRoutines();
-                    // Keep sidebar open so user sees result
-                    toggleSidebar(true);
-                    
-                    alert(`Successfully imported ${routinesToAdd.length} routine(s).`);
-
-                } catch (err) { 
-                    alert("Import Failed: " + err.message); 
-                }
+                    saveData(); renderSidebarRoutines(); toggleSidebar(true); alert(`Imported ${routinesToAdd.length} routine(s).`);
+                } catch (err) { alert("Import Failed: " + err.message); }
             };
-            r.readAsText(f); 
-            input.value = ''; // Reset input so same file can be selected again if needed
+            r.readAsText(f); input.value = '';
         }
 
-        // --- BACKUP & RESTORE (DESTRUCTIVE) ---
-        function triggerFullRestore() {
-            document.getElementById('import-full-input').click();
-        }
+        function triggerFullRestore() { document.getElementById('import-full-input').click(); }
 
         function restoreAllRoutines(input) {
             const f = input.files[0]; if (!f) return;
@@ -520,43 +542,33 @@
             r.onload = (e) => {
                 try {
                     const json = JSON.parse(e.target.result);
-                    if (!Array.isArray(json)) throw new Error("Invalid backup format. Backup must be an array.");
-                    if (!confirm("⚠️ WARNING: This will DELETE all current routines and replace them with the backup. Continue?")) { input.value = ''; return; }
+                    const newStats = json.stats || state.stats;
+                    const routinesData = Array.isArray(json) ? json : (json.routines || []);
+                    if (!confirm("Overwrite all data?")) { input.value = ''; return; }
                     
-                    // Use the same sanitizer but keep original IDs if possible (optional, but safer to sanitize)
-                    const cleanRoutines = json.map(r => {
-                        // Minimal cleaning, trusting backup structure mostly
-                         return {
-                            id: r.id || Date.now().toString(), 
-                            name: r.name || "Restored",
-                            exercises: Array.isArray(r.exercises) ? r.exercises.map(ex => ({
-                                id: ex.id || Date.now(), 
-                                title: ex.title || "Untitled", bpm: ex.bpm || 100,
-                                durationSec: ex.durationSec || 60, remainingSec: ex.durationSec || 60,
-                                completed: !!ex.completed, autoStart: ex.autoStart!==undefined?ex.autoStart:true,
-                                archived: !!ex.archived, reps: ex.reps||1, currentRep: ex.currentRep||1, comment: ex.comment||""
-                            })) : []
-                        };
-                    });
+                    const cleanRoutines = routinesData.map(r => ({
+                        id: r.id || Date.now().toString(), name: r.name || "Restored",
+                        exercises: Array.isArray(r.exercises) ? r.exercises.map(ex => ({
+                            id: ex.id || Date.now(), title: ex.title || "Untitled", bpm: ex.bpm || 100,
+                            durationSec: ex.durationSec || 60, remainingSec: ex.durationSec || 60,
+                            completed: !!ex.completed, autoStart: ex.autoStart!==undefined?ex.autoStart:true,
+                            archived: !!ex.archived, reps: ex.reps||1, currentRep: ex.currentRep||1, comment: ex.comment||""
+                        })) : []
+                    }));
 
-                    state.routines = cleanRoutines; 
+                    state.routines = cleanRoutines; state.stats = newStats;
                     state.currentRoutineId = state.routines[0]?.id || 'default';
-                    saveData(); 
-                    resetRoutineLogic(); 
-                    updateUI(); 
-                    toggleSidebar(false); 
-                    alert("System restored successfully!");
-                } catch (err) { alert("Restore Error: " + err.message); }
+                    saveData(); resetRoutineLogic(); updateUI(); toggleSidebar(false); alert("Restored!");
+                } catch (err) { alert("Error: " + err.message); }
             };
             r.readAsText(f); input.value = '';
         }
 
-        // --- EXPORT FUNCTIONS ---
         function exportRoutines() { 
-            const d=JSON.stringify(state.routines,null,2); 
+            const exportObj = { routines: state.routines, stats: state.stats };
+            const d=JSON.stringify(exportObj,null,2); 
             downloadJSON(d, `backup_full_${new Date().toISOString().split('T')[0]}.json`);
         }
-
         function exportSingleRoutine(id) {
             const routine = state.routines.find(r => r.id === id);
             if(!routine) return;
@@ -570,12 +582,10 @@
             const u=URL.createObjectURL(b); 
             const a=document.body.appendChild(document.createElement('a')); 
             a.href=u; a.download=fileName; 
-            a.click(); 
-            URL.revokeObjectURL(u);
-            document.body.removeChild(a);
+            a.click(); URL.revokeObjectURL(u); document.body.removeChild(a);
         }
 
-        // --- AUDIO & UI HELPERS ---
+        // --- AUDIO & LOGIC ---
         function toggleGlobalAudioOnly() {
             state.isAudioOn = !state.isAudioOn;
             if (state.isAudioOn) { initAudio(); startMetronomeAudio(); } else { stopMetronomeAudio(); }
@@ -619,7 +629,7 @@
                     const activeList = routine.exercises.filter(e => !e.archived);
                     const idx = activeList.findIndex(e => e.id === state.activeExerciseId);
                     if (idx < activeList.length - 1) setTimeout(() => playExercise(activeList[idx+1].id), 1500);
-                    else finishRoutine();
+                    else finishAndResetRoutine(); // Auto finish if last
                 }
             }
         }
@@ -628,6 +638,7 @@
         setInterval(() => {
             if (state.isExercisePlaying) {
                 state.globalSeconds++;
+                recordProgressSeconds(1);
                 document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
                 if (state.activeExerciseId && state.exerciseRemaining > 0) {
                     state.exerciseRemaining--;
@@ -642,6 +653,9 @@
 
         function updateUI() {
             renderExercises();
+            // THIS LINE FIXES THE VISUAL UPDATE BUG
+            document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
+            
             document.getElementById('global-bpm-display').innerText = `${state.bpm} BPM`;
             document.getElementById('current-routine-title').innerText = getCurrentRoutine().name;
             const icon = document.getElementById('global-play-icon');
@@ -670,24 +684,11 @@
                 const autoIcon = !ex.autoStart ? '<i class="fas fa-volume-mute text-xs ml-2 text-gray-400"></i>' : '';
                 const startBtnClass = isTimerRunning ? "bg-[#E53935] text-white border-none" : "bg-white text-[#E53935] border border-red-100 shadow-sm";
 
-                // --- DASHBOARD ATTACHMENTS ---
                 const imgUrl = getFirstImage(ex.comment);
                 const anyUrl = getFirstUrl(ex.comment);
-                
                 let rightContent = '';
-                if(imgUrl) {
-                    rightContent += `
-                        <img src="${imgUrl}" class="w-12 h-12 flex-shrink-0 object-cover rounded border border-gray-200 bg-gray-50 shadow-sm cursor-zoom-in hover:opacity-80 transition ml-2" 
-                             onclick="event.stopPropagation(); openImageModal('${imgUrl}')" onerror="this.style.display='none'">
-                    `;
-                }
-                if(anyUrl) {
-                    rightContent += `
-                        <button onclick="event.stopPropagation(); window.open('${anyUrl}', '_blank')" class="w-10 h-10 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-[#E53935] hover:bg-gray-100 rounded-full transition ml-1" title="Open Link">
-                            <i class="fas fa-external-link-alt"></i>
-                        </button>
-                    `;
-                }
+                if(imgUrl) rightContent += `<img src="${imgUrl}" class="w-12 h-12 flex-shrink-0 object-cover rounded border border-gray-200 bg-gray-50 shadow-sm cursor-zoom-in hover:opacity-80 transition ml-2" onclick="event.stopPropagation(); openImageModal('${imgUrl}')" onerror="this.style.display='none'">`;
+                if(anyUrl) rightContent += `<button onclick="event.stopPropagation(); window.open('${anyUrl}', '_blank')" class="w-10 h-10 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-[#E53935] hover:bg-gray-100 rounded-full transition ml-1"><i class="fas fa-external-link-alt"></i></button>`;
 
                 const el = document.createElement('div');
                 el.className = `draggable-item rounded-xl relative overflow-hidden transition-all shadow-sm border border-gray-100 mb-4 ${ex.completed ? 'bg-[#D1FAE5] border-green-200' : isActive ? 'bg-[#E0F2F1] border-green-100 scale-[1.02]' : 'bg-white'}`;
@@ -731,14 +732,11 @@
         
         function openDetailsView(id) {
             state.viewingExerciseId = id; const ex = getExerciseById(id);
-            // SET EDITABLE TITLE
             document.getElementById('detail-title-input').value = ex.title;
-            
             document.getElementById('detail-bpm').innerText = `${ex.bpm} BPM`;
             document.getElementById('detail-min-display').innerText = `${Math.floor(ex.durationSec / 60)} min`;
             document.getElementById('detail-sec-display').innerText = `${(ex.durationSec % 60).toString().padStart(2, '0')} sec`;
             document.getElementById('detail-autostart').checked = ex.autoStart;
-            document.getElementById('detail-routine-name').innerText = getCurrentRoutine().name;
             document.getElementById('detail-comment').value = ex.comment || "";
             document.getElementById('detail-reps-display').innerText = ex.reps;
             document.getElementById('detail-reps-indicator').innerText = `Rep ${ex.currentRep}/${ex.reps}`;
@@ -747,9 +745,7 @@
             document.getElementById('details-view').classList.add('active');
             const displayTime = (state.activeExerciseId === id) ? state.exerciseRemaining : ex.remainingSec;
             document.getElementById('detail-time-display').innerText = formatTime(displayTime);
-            
             renderCommentAttachments(ex.comment);
-            
             updateDetailsUI();
         }
         function updateDetailsUI() { const btn = document.getElementById('detail-play-btn'); const active = state.activeExerciseId === state.viewingExerciseId && state.isExercisePlaying; btn.innerText = active ? "Pause" : "Start"; btn.className = active ? "flex-1 py-3 text-white bg-[#E53935] rounded-lg" : "flex-1 py-3 text-[#E53935] bg-white border rounded-lg"; }
@@ -762,13 +758,7 @@
             state.routines.forEach(r=>{ 
                 const li=document.createElement('li'); 
                 li.className="flex justify-between items-center p-2 hover:bg-white/10 rounded group"; 
-                li.innerHTML=`
-                    <span onclick="switchRoutine('${r.id}')" class="flex-1 cursor-pointer truncate mr-2 ${r.id===state.currentRoutineId?'font-bold bg-white/20':''}">${r.name}</span>
-                    <div class="flex items-center gap-3 opacity-80 group-hover:opacity-100 flex-shrink-0">
-                        <button onclick="exportSingleRoutine('${r.id}')" title="Export Routine"><i class="fas fa-file-export text-xs"></i></button>
-                        <button onclick="renameRoutine('${r.id}')"><i class="fas fa-pencil-alt text-xs"></i></button>
-                        <button onclick="deleteRoutine('${r.id}')"><i class="fas fa-trash text-xs"></i></button>
-                    </div>`; 
+                li.innerHTML=`<span onclick="switchRoutine('${r.id}')" class="flex-1 cursor-pointer truncate mr-2 ${r.id===state.currentRoutineId?'font-bold bg-white/20':''}">${r.name}</span><div class="flex items-center gap-3 opacity-80 group-hover:opacity-100 flex-shrink-0"><button onclick="exportSingleRoutine('${r.id}')" title="Export Routine"><i class="fas fa-file-export text-xs"></i></button><button onclick="renameRoutine('${r.id}')"><i class="fas fa-pencil-alt text-xs"></i></button><button onclick="deleteRoutine('${r.id}')"><i class="fas fa-trash text-xs"></i></button></div>`; 
                 l.appendChild(li); 
             }); 
         }
@@ -787,16 +777,224 @@
         function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); renderCommentAttachments(v); }
         function adjustDetailReps(v) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; ex.reps=Math.max(1,ex.reps+v); if(ex.currentRep>ex.reps)ex.currentRep=1; saveData(); document.getElementById('detail-reps-display').innerText=ex.reps; document.getElementById('detail-reps-indicator').innerText=`Rep ${ex.currentRep}/${ex.reps}`; updateUI(); }
         function adjustDetailTime(type,val) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; let total=ex.durationSec; if(type==='min') total=Math.max(0,total+(val*60)); else total=Math.max(0,total+val); ex.durationSec=total; ex.remainingSec=total; saveData(); document.getElementById('detail-min-display').innerText=`${Math.floor(total/60)} min`; document.getElementById('detail-sec-display').innerText=`${(total%60).toString().padStart(2,'0')} sec`; }
-        function resetCurrentDetailExercise() { const id=state.viewingExerciseId; const ex=getExerciseById(id); if(ex){ ex.remainingSec=ex.durationSec; ex.completed=false; ex.currentRep=1; if(state.activeExerciseId===id){ pauseSequence(); state.exerciseRemaining=ex.durationSec; } saveData(); updateDetailsUI(); } }
-        function completeDetailExercise() { const ex=getExerciseById(state.viewingExerciseId); ex.completed=true; ex.remainingSec=0; saveData(); closeDetailsView(); }
+        
+        // --- UPDATED RESET FUNCTION ---
+        function resetCurrentDetailExercise() {
+            const id = state.viewingExerciseId;
+            const ex = getExerciseById(id);
+            if (ex) {
+                // If previously completed, deduct time (Undo completion)
+                if (ex.completed) {
+                    const timeToDeduct = ex.durationSec; 
+                    state.globalSeconds = Math.max(0, state.globalSeconds - timeToDeduct);
+                    recordProgressSeconds(-timeToDeduct);
+                }
+
+                ex.remainingSec = ex.durationSec;
+                ex.completed = false;
+                ex.currentRep = 1;
+
+                if (state.activeExerciseId === id) {
+                    pauseSequence();
+                    state.exerciseRemaining = ex.durationSec;
+                }
+                
+                saveData();
+                updateDetailsUI();
+                
+                // Update UI Immediately
+                document.getElementById('detail-time-display').innerText = formatTime(ex.durationSec);
+                document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
+            }
+        }
+        
+        function completeDetailExercise() {
+            const ex = getExerciseById(state.viewingExerciseId);
+            if (!ex) return;
+
+            // 1. Calculate time to credit
+            let timeToAdd = 0;
+            
+            if (state.activeExerciseId === ex.id) {
+                // If it was playing, use the live counter
+                timeToAdd = state.exerciseRemaining;
+                
+                // Stop audio/timer if it was running
+                state.isExercisePlaying = false;
+                state.isAudioOn = false;
+                stopMetronomeAudio();
+                state.activeExerciseId = null;
+            } else {
+                // If paused or never started, use the stored remaining time
+                timeToAdd = ex.remainingSec;
+            }
+
+            // 2. Add to Global Practice Time (Dashboard)
+            state.globalSeconds += timeToAdd;
+
+            // 3. Add to Stats (Professional Stats View)
+            recordProgressSeconds(timeToAdd);
+
+            // 4. Mark complete
+            ex.completed = true;
+            ex.remainingSec = 0;
+            
+            saveData();
+            closeDetailsView();
+        }
+
         function toggleDetailsMenu(e) { e.stopPropagation(); document.getElementById('details-menu-dropdown').classList.toggle('hidden'); }
         function handleWindowClick(e) { const m=document.getElementById('details-menu-dropdown'); const b=document.getElementById('details-menu-btn'); if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden'); }
         function duplicateExercise() { const o=getExerciseById(state.viewingExerciseId); if(!o)return; const c=JSON.parse(JSON.stringify(o)); c.id=Date.now(); c.title+=" (Copy)"; c.completed=false; c.remainingSec=c.durationSec; c.currentRep=1; const r=getCurrentRoutine(); const i=r.exercises.findIndex(e=>e.id===o.id); r.exercises.splice(i+1,0,c); saveData(); closeDetailsView(); }
         function archiveExercise() { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; if(confirm("Archive?")){ ex.archived=true; saveData(); closeDetailsView(); } }
         function deleteDetailExercise() { const r=getCurrentRoutine(); if(!confirm("Delete?"))return; const i=r.exercises.findIndex(e=>e.id===state.viewingExerciseId); if(i>-1){ r.exercises.splice(i,1); saveData(); closeDetailsView(); } }
         function showArchivedCount() { alert(`Archived: ${getCurrentRoutine().exercises.filter(e=>e.archived).length}`); }
-        function triggerImport() { document.getElementById('import-input').click(); }
         function closeDetailsView() { state.viewingExerciseId=null; document.getElementById('details-view').classList.remove('active'); document.getElementById('dashboard-view').classList.add('active'); updateUI(); }
+
+        // --- STATS VIEW FUNCTIONS ---
+        let weeklyChartInstance = null;
+        let routineChartInstance = null;
+
+        function openStatsView() {
+            toggleSidebar(false);
+            document.getElementById('dashboard-view').classList.remove('active');
+            document.getElementById('details-view').classList.remove('active');
+            document.getElementById('stats-view').classList.add('active');
+            renderStats();
+        }
+
+        function closeStatsView() {
+            document.getElementById('stats-view').classList.remove('active');
+            document.getElementById('dashboard-view').classList.add('active');
+        }
+
+        // Helper to generate consistent colors based on routine name
+        function stringToColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); }
+            const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+            return '#' + "00000".substring(0, 6 - c.length) + c;
+        }
+
+        function renderStats() {
+            // 1. Calculate Summary
+            const entries = Object.entries(state.stats);
+            const totalSecondsAllTime = entries.reduce((acc, [_, data]) => acc + (data.totalSec || 0), 0);
+            
+            const dates = Object.keys(state.stats).sort();
+            let streak = 0;
+            if (dates.length > 0) {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const yesterdayStr = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+                let lastDate = new Date(dates[dates.length-1]);
+                let lastDateStr = lastDate.toISOString().split('T')[0];
+                if (lastDateStr === todayStr || lastDateStr === yesterdayStr) {
+                    streak = 1;
+                    for (let i = dates.length - 2; i >= 0; i--) {
+                        const curr = new Date(dates[i]);
+                        const prev = new Date(dates[i+1]);
+                        const diffTime = Math.abs(prev - curr);
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                        if (diffDays === 1) streak++; else break;
+                    }
+                }
+            }
+
+            document.getElementById('stat-total-time').innerText = `${Math.floor(totalSecondsAllTime / 3600)}h ${Math.floor((totalSecondsAllTime % 3600) / 60)}m`;
+            document.getElementById('stat-streak').innerText = streak;
+
+            // 2. Prepare Stacked Bar Data (Last 7 Days)
+            const last7DaysLabels = [];
+            const last7DaysKeys = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                last7DaysKeys.push(d.toISOString().split('T')[0]);
+                last7DaysLabels.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
+            }
+
+            // Identify all unique routines played in this period
+            const uniqueRoutines = new Set();
+            last7DaysKeys.forEach(dateKey => {
+                if (state.stats[dateKey] && state.stats[dateKey].routines) {
+                    Object.keys(state.stats[dateKey].routines).forEach(rName => uniqueRoutines.add(rName));
+                }
+            });
+
+            // Build Datasets for Stacked Chart
+            const datasets = Array.from(uniqueRoutines).map(routineName => {
+                const data = last7DaysKeys.map(dateKey => {
+                    const dayStats = state.stats[dateKey];
+                    if (dayStats && dayStats.routines && dayStats.routines[routineName]) {
+                        return Math.round(dayStats.routines[routineName] / 60); // Minutes
+                    }
+                    return 0;
+                });
+                return {
+                    label: routineName,
+                    data: data,
+                    backgroundColor: stringToColor(routineName),
+                    borderRadius: 2
+                };
+            });
+
+            // 4. Render Weekly Bar Chart (Stacked)
+            const ctx1 = document.getElementById('weeklyChart').getContext('2d');
+            if (weeklyChartInstance) weeklyChartInstance.destroy();
+            weeklyChartInstance = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: last7DaysLabels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: {size: 10} } },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    scales: { 
+                        x: { stacked: true }, 
+                        y: { stacked: true, beginAtZero: true, title: { display: true, text: 'Minutes' } } 
+                    }
+                }
+            });
+
+            // 5. Render Routine Doughnut Chart (Overall)
+            const routineTotals = {};
+            entries.forEach(([_, data]) => {
+                if (data.routines) {
+                    Object.entries(data.routines).forEach(([name, sec]) => {
+                        routineTotals[name] = (routineTotals[name] || 0) + sec;
+                    });
+                }
+            });
+            const routineLabels = Object.keys(routineTotals);
+            const routineData = Object.values(routineTotals).map(s => Math.round(s/60)); 
+            
+            const ctx2 = document.getElementById('routineChart').getContext('2d');
+            if (routineChartInstance) routineChartInstance.destroy();
+            
+            routineChartInstance = new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: routineLabels,
+                    datasets: [{
+                        data: routineData,
+                        backgroundColor: routineLabels.map(name => stringToColor(name)),
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } 
+                    }
+                }
+            });
+        }
     </script>
 </body>
 </html>
