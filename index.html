@@ -636,17 +636,20 @@
        function closeStatModalAndFinish() {
             document.getElementById('stat-input-modal').classList.add('hidden');
             
-            // VERIFICACIÓN: ¿Venimos del botón 'Complete' de Details?
             if (state.pendingDetailCompletion) {
-                state.pendingDetailCompletion = false; // Resetear bandera
-                forceFinishDetail(); // Forzar finalización y cierre de vista
+                state.pendingDetailCompletion = false; 
+                forceFinishDetail(); 
             } else {
-                finalizeCompletion(); // Lógica normal (chequeo de reps)
+                // CAMBIO: Pasamos false para no repetir el sonido
+                finalizeCompletion(false); 
             }
         }
         
         function handleExerciseCompletion() {
             const ex = getExerciseById(state.activeExerciseId); if (!ex) return;
+            
+            // CAMBIO: El sonido suena INMEDIATAMENTE al terminar el tiempo
+            playBellSound();
             
             // Check for statistic input requirement
             if (ex.statisticName && !ex.completed) {
@@ -658,15 +661,19 @@
                 document.getElementById('stat-input-value').value = '';
                 document.getElementById('stat-input-modal').classList.remove('hidden');
                 setTimeout(() => document.getElementById('stat-input-value').focus(), 100);
-                return; // Stop here, wait for input
+                return; // Detenemos aquí para esperar el input, PERO el sonido ya sonó.
             }
             
-            finalizeCompletion();
+            // CAMBIO: Llamamos a finalizar con false para que no suene doble
+            finalizeCompletion(false);
         }
 
-        function finalizeCompletion() {
+        function finalizeCompletion(playSound = true) {
             const ex = getExerciseById(state.activeExerciseId);
-            playBellSound();
+            
+            // CAMBIO: Ahora el sonido es condicional. 
+            // Si playSound es false, nos saltamos el timbre porque ya sonó antes.
+            if (playSound) playBellSound();
             
             if (ex.currentRep < ex.reps) {
                 ex.currentRep++; state.exerciseRemaining = ex.durationSec; ex.remainingSec = ex.durationSec;
