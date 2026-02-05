@@ -396,8 +396,22 @@
         }
 
         function playBellSound() {
-            if (bellSynth) bellSynth.triggerAttackRelease(["C6", "E6", "G6"], "1n");
+            if (!bellSynth) return;
+
+            bellSynth.set({
+                oscillator: { type: "sine" }, // sonido más suave
+                envelope: {
+                attack: 0.05,
+                decay: 0.6,
+                sustain: 0.1,
+                release: 0.8,
+                },
+                volume: -18, // baja el volumen
+            });
+
+            bellSynth.triggerAttackRelease(["C5", "E5", "G5"], "2n");
         }
+
 
         function startMetronomeAudio() {
             beat = 0;
