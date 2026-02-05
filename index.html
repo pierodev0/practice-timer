@@ -878,7 +878,31 @@
         }
 
         function formatTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`; }
-        function getCurrentRoutine() { return state.routines.find(r => r.id === state.currentRoutineId); }
+        function getCurrentRoutine() {
+            let routine = state.routines.find(r => r.id === state.currentRoutineId);
+            
+            // CORRECCIÓN: Si la rutina actual no existe (el error que tienes), forzamos una
+            if (!routine) {
+                console.warn("Rutina actual no encontrada, reseteando a la primera disponible.");
+                
+                if (state.routines.length > 0) {
+                    // Seleccionamos la primera rutina de la lista
+                    state.currentRoutineId = state.routines[0].id;
+                    routine = state.routines[0];
+                } else {
+                    // Caso extremo: No hay rutinas, creamos una de emergencia
+                    routine = { 
+                        id: 'default-' + Date.now(), 
+                        name: 'Rutina Recuperada', 
+                        exercises: [] 
+                    };
+                    state.routines = [routine];
+                    state.currentRoutineId = routine.id;
+                }
+                saveData(); // Guardamos la corrección en localStorage
+            }
+            return routine;
+        }
         function getExerciseById(id) { return getCurrentRoutine().exercises.find(e => e.id === id); }
         
         function openDetailsView(id) {
