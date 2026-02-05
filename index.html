@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html.
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -347,8 +347,7 @@
             </div>
         </div>
     </div>
-
-    <script>
+<script>
         // --- DATA & STATE ---
         const initialExercises = [
             { id: 1, title: 'Major Scale', bpm: 80, durationSec: 10, remainingSec: 10, completed: false, autoStart: true, archived: false, reps: 1, currentRep: 1, comment: "Sheet Music: https://jtgt-static.b-cdn.net/images/modules/INT1/IM-113-MajorScale-P1.jpg", statisticName: null, statisticLogs: [] },
@@ -359,7 +358,7 @@
             isExercisePlaying: false, isAudioOn: false, bpm: 120, globalSeconds: 0,
             activeExerciseId: null, exerciseRemaining: 0, viewingExerciseId: null,
             autoplayRoutine: false, 
-            pendingDetailCompletion: false, // <--- AGREGA ESTO
+            pendingDetailCompletion: false,
             routines: [{ id: 'default', name: 'Rutina 1', exercises: JSON.parse(JSON.stringify(initialExercises)) }],
             currentRoutineId: 'default',
             newExerciseForm: { bpm: 100, min: 2, sec: 0, reps: 1 },
@@ -368,12 +367,64 @@
 
         const STORAGE_KEY = 'musicRoutineApp_v36_stats';
 
-        // --- TONE.JS SETUP ---
+        // --- WEB WORKER SETUP (HILO EN SEGUNDO PLANO) ---
+        // Creamos el worker como un Blob para no necesitar archivos externos
+        const workerCode = `
+            let intervalId;
+            self.onmessage = function(e) {
+                if (e.data === 'start') {
+                    if (!intervalId) {
+                        intervalId = setInterval(() => {
+                            self.postMessage('tick');
+                        }, 1000);
+                    }
+                } else if (e.data === 'stop') {
+                    clearInterval(intervalId);
+                    intervalId = null;
+                }
+            };
+        `;
+        
+        const blob = new Blob([workerCode], { type: "application/javascript" });
+        const worker = new Worker(URL.createObjectURL(blob));
+
+        // Esta función recibe el 'tick' del worker cada segundo, sin importar si la pestaña está oculta
+        worker.onmessage = function(e) {
+            if (e.data === 'tick' && state.isExercisePlaying) {
+                // 1. Lógica del tiempo
+                state.globalSeconds++;
+                recordProgressSeconds(1);
+
+                if (state.activeExerciseId && state.exerciseRemaining > 0) {
+                    state.exerciseRemaining--;
+                    const ex = getExerciseById(state.activeExerciseId); 
+                    if(ex) ex.remainingSec = state.exerciseRemaining;
+                    
+                    if (state.exerciseRemaining <= 0) {
+                        handleExerciseCompletion();
+                    }
+                }
+
+                // 2. Actualizar UI
+                requestAnimationFrame(() => {
+                    document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
+                    if (state.activeExerciseId) {
+                        renderExercises(); 
+                        if(state.viewingExerciseId === state.activeExerciseId) {
+                            document.getElementById('detail-time-display').innerText = formatTime(state.exerciseRemaining);
+                        }
+                    }
+                });
+            }
+        };
+
+        // --- TONE.JS SETUP (SOLO AUDIO) ---
         let metroSynth, bellSynth;
         let beat = 0;
 
         async function initAudio() {
             await Tone.start();
+            
             if (!metroSynth) {
                 metroSynth = new Tone.Synth({
                     oscillator: { type: "sine" },
@@ -385,6 +436,7 @@
                     envelope: { attack: 0.01, decay: 1, sustain: 0, release: 1 }
                 }).toDestination();
                 
+                // El metrónomo musical sigue usando Tone.Transport para precisión de ritmo
                 Tone.Transport.scheduleRepeat((time) => {
                     if (state.isAudioOn) {
                         const freq = beat === 0 ? "C6" : "G5";
@@ -397,21 +449,13 @@
 
         function playBellSound() {
             if (!bellSynth) return;
-
             bellSynth.set({
-                oscillator: { type: "sine" }, // sonido más suave
-                envelope: {
-                attack: 0.05,
-                decay: 0.6,
-                sustain: 0.1,
-                release: 0.8,
-                },
-                volume: -18, // baja el volumen
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.05, decay: 0.6, sustain: 0.1, release: 0.8 },
+                volume: -18,
             });
-
             bellSynth.triggerAttackRelease(["C5", "E5", "G5"], "2n");
         }
-
 
         function startMetronomeAudio() {
             beat = 0;
@@ -443,7 +487,6 @@
                     state.routines = parsed.routines;
                     state.currentRoutineId = parsed.currentRoutineId || 'default';
                     state.stats = parsed.stats || {};
-                    // Ensure defaults for new fields
                     state.routines.forEach(r => r.exercises.forEach(ex => {
                         if (ex.durationSec === undefined && ex.duration !== undefined) { ex.durationSec = ex.duration * 60; delete ex.duration; }
                         if (ex.remainingSec === undefined) ex.remainingSec = ex.durationSec;
@@ -455,7 +498,6 @@
                 } catch (e) { console.error("Error loading data", e); }
             }
             
-            // Set default dates for chart filters (Last 30 days)
             const end = new Date();
             const start = new Date();
             start.setDate(end.getDate() - 30);
@@ -473,7 +515,7 @@
             if(ex) { 
                 ex.statisticName = newVal.trim() === "" ? null : newVal; 
                 saveData(); 
-                renderExercises(); // Update list to show/hide badge
+                renderExercises(); 
             }
         }
 
@@ -595,7 +637,11 @@
         // Audio & Playback
         function toggleGlobalAudioOnly() {
             state.isAudioOn = !state.isAudioOn;
-            if (state.isAudioOn) { initAudio().then(startMetronomeAudio); } else { stopMetronomeAudio(); }
+            if (state.isAudioOn) { 
+                initAudio().then(startMetronomeAudio); 
+            } else { 
+                stopMetronomeAudio();
+            }
             updateUI();
         }
         function adjustGlobalBPM(val) {
@@ -617,15 +663,26 @@
             state.bpm = ex.bpm; 
             state.isExercisePlaying = true;
             
+            // Iniciamos el worker (reloj del sistema)
+            worker.postMessage('start');
+
             initAudio().then(() => {
                 Tone.Transport.bpm.value = state.bpm;
-                if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); } else { state.isAudioOn = false; stopMetronomeAudio(); }
+                if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); } 
+                else { state.isAudioOn = false; stopMetronomeAudio(); }
             });
             updateUI(); saveData();
         }
         function pauseSequence() {
             if (state.activeExerciseId) { const ex = getExerciseById(state.activeExerciseId); if(ex) ex.remainingSec = state.exerciseRemaining; }
-            state.isExercisePlaying = false; state.isAudioOn = false; stopMetronomeAudio(); saveData(); updateUI();
+            state.isExercisePlaying = false; 
+            state.isAudioOn = false; 
+            
+            // Detenemos worker y audio
+            worker.postMessage('stop');
+            stopMetronomeAudio(); 
+            
+            saveData(); updateUI();
         }
         
         // --- NEW STATISTIC LOGIC ---
@@ -654,50 +711,46 @@
                 state.pendingDetailCompletion = false; 
                 forceFinishDetail(); 
             } else {
-                // CAMBIO: Pasamos false para no repetir el sonido
                 finalizeCompletion(false); 
             }
         }
         
         function handleExerciseCompletion() {
+            // Esta función se llama desde el worker, aseguramos que el contexto de audio esté activo para el sonido
             const ex = getExerciseById(state.activeExerciseId); if (!ex) return;
             
-            // CAMBIO: El sonido suena INMEDIATAMENTE al terminar el tiempo
             playBellSound();
             
-            // Check for statistic input requirement
             if (ex.statisticName && !ex.completed) {
-                state.isExercisePlaying = false; 
-                state.isAudioOn = false; 
-                stopMetronomeAudio();
+                pauseSequence(); // Esto detiene el worker y el audio
                 
                 document.getElementById('stat-modal-title').innerText = ex.statisticName;
                 document.getElementById('stat-input-value').value = '';
                 document.getElementById('stat-input-modal').classList.remove('hidden');
                 setTimeout(() => document.getElementById('stat-input-value').focus(), 100);
-                return; // Detenemos aquí para esperar el input, PERO el sonido ya sonó.
+                return; 
             }
             
-            // CAMBIO: Llamamos a finalizar con false para que no suene doble
             finalizeCompletion(false);
         }
 
         function finalizeCompletion(playSound = true) {
             const ex = getExerciseById(state.activeExerciseId);
             
-            // CAMBIO: Ahora el sonido es condicional. 
-            // Si playSound es false, nos saltamos el timbre porque ya sonó antes.
             if (playSound) playBellSound();
             
             if (ex.currentRep < ex.reps) {
                 ex.currentRep++; state.exerciseRemaining = ex.durationSec; ex.remainingSec = ex.durationSec;
                 state.isExercisePlaying = true;
-                initAudio().then(() => {
-                    if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); }
-                });
+                
+                // Reiniciar worker para asegurar timing fresco
+                worker.postMessage('stop');
+                worker.postMessage('start');
+                
+                if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); }
                 updateUI(); saveData();
             } else {
-                state.isExercisePlaying = false; state.isAudioOn = false; stopMetronomeAudio();
+                pauseSequence();
                 ex.completed = true; ex.remainingSec = 0; saveData(); updateUI();
                 if (state.autoplayRoutine) {
                     const routine = getCurrentRoutine();
@@ -714,27 +767,21 @@
             const list = document.getElementById('edit-stats-list');
             list.innerHTML = '';
             
-            // Collect all logs from all exercises
             let allLogs = [];
             state.routines.forEach(r => {
                 r.exercises.forEach(e => {
                     if (e.statisticLogs && e.statisticLogs.length > 0) {
                         e.statisticLogs.forEach((log, index) => {
                             allLogs.push({
-                                routineId: r.id,
-                                exerciseId: e.id,
-                                index: index,
-                                title: e.title,
-                                statName: e.statisticName || "Stat",
-                                date: log.date,
-                                value: log.value
+                                routineId: r.id, exerciseId: e.id, index: index,
+                                title: e.title, statName: e.statisticName || "Stat",
+                                date: log.date, value: log.value
                             });
                         });
                     }
                 });
             });
 
-            // Sort by date descending
             allLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
 
             if (allLogs.length === 0) {
@@ -757,7 +804,6 @@
                     list.appendChild(div);
                 });
             }
-
             document.getElementById('edit-stats-modal').classList.remove('hidden');
         }
 
@@ -772,9 +818,7 @@
                 if (!isNaN(num)) {
                     log.value = num;
                     saveData();
-                    openEditStatsModal(); // Refresh list
-                    renderStats(); // Refresh charts
-                    renderExercises(); // Refresh main list badges
+                    openEditStatsModal(); renderStats(); renderExercises();
                 } else {
                     alert("Please enter a valid number.");
                 }
@@ -787,28 +831,30 @@
                 const e = r.exercises.find(x => x.id == eId);
                 e.statisticLogs.splice(index, 1);
                 saveData();
-                openEditStatsModal();
-                renderStats();
-                renderExercises();
+                openEditStatsModal(); renderStats(); renderExercises();
             }
         }
 
-        setInterval(() => {
-            if (state.isExercisePlaying) {
-                state.globalSeconds++;
-                recordProgressSeconds(1);
-                document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
-                if (state.activeExerciseId && state.exerciseRemaining > 0) {
-                    state.exerciseRemaining--;
-                    const ex = getExerciseById(state.activeExerciseId); if(ex) ex.remainingSec = state.exerciseRemaining; 
-                    renderExercises();
-                    if(state.viewingExerciseId === state.activeExerciseId) document.getElementById('detail-time-display').innerText = formatTime(state.exerciseRemaining);
-                } else if (state.activeExerciseId && state.exerciseRemaining <= 0) {
-                    handleExerciseCompletion();
+        // --- SAFE ROUTINE GETTER (CRASH FIX) ---
+        function getCurrentRoutine() {
+            let routine = state.routines.find(r => r.id === state.currentRoutineId);
+            if (!routine) {
+                console.warn("Rutina actual no encontrada, reseteando a la primera disponible.");
+                if (state.routines.length > 0) {
+                    state.currentRoutineId = state.routines[0].id;
+                    routine = state.routines[0];
+                } else {
+                    routine = { id: 'default-' + Date.now(), name: 'Rutina Recuperada', exercises: [] };
+                    state.routines = [routine];
+                    state.currentRoutineId = routine.id;
                 }
+                saveData();
             }
-        }, 1000);
-
+            return routine;
+        }
+        function getExerciseById(id) { return getCurrentRoutine().exercises.find(e => e.id === id); }
+        
+        // --- UI RENDERERS ---
         function updateUI() {
             renderExercises();
             document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
@@ -835,8 +881,6 @@
                 else if(ex.durationSec > 0) { progressPercent = ((ex.durationSec - currentRemaining) / ex.durationSec) * 100; }
 
                 const repsBadge = ex.reps > 1 ? `<span class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded font-bold ml-2">Rep ${ex.currentRep}/${ex.reps}</span>` : '';
-                
-                // NEW: Stat Badge with Last Value
                 let statBadge = '';
                 if (ex.statisticName) {
                     let valText = '';
@@ -878,39 +922,10 @@
         }
 
         function formatTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`; }
-        function getCurrentRoutine() {
-            let routine = state.routines.find(r => r.id === state.currentRoutineId);
-            
-            // CORRECCIÓN: Si la rutina actual no existe (el error que tienes), forzamos una
-            if (!routine) {
-                console.warn("Rutina actual no encontrada, reseteando a la primera disponible.");
-                
-                if (state.routines.length > 0) {
-                    // Seleccionamos la primera rutina de la lista
-                    state.currentRoutineId = state.routines[0].id;
-                    routine = state.routines[0];
-                } else {
-                    // Caso extremo: No hay rutinas, creamos una de emergencia
-                    routine = { 
-                        id: 'default-' + Date.now(), 
-                        name: 'Rutina Recuperada', 
-                        exercises: [] 
-                    };
-                    state.routines = [routine];
-                    state.currentRoutineId = routine.id;
-                }
-                saveData(); // Guardamos la corrección en localStorage
-            }
-            return routine;
-        }
-        function getExerciseById(id) { return getCurrentRoutine().exercises.find(e => e.id === id); }
-        
         function openDetailsView(id) {
             state.viewingExerciseId = id; const ex = getExerciseById(id);
             document.getElementById('detail-title-input').value = ex.title;
-            // NEW: Set Statistic Name Input
             document.getElementById('detail-stat-name-input').value = ex.statisticName || "";
-            
             document.getElementById('detail-bpm').innerText = `${ex.bpm} BPM`;
             document.getElementById('detail-min-display').innerText = `${Math.floor(ex.durationSec / 60)} min`;
             document.getElementById('detail-sec-display').innerText = `${(ex.durationSec % 60).toString().padStart(2, '0')} sec`;
@@ -946,54 +961,21 @@
         function adjustNewReps(v) { state.newExerciseForm.reps=Math.max(1,state.newExerciseForm.reps+v); document.getElementById('new-reps-display').innerText=state.newExerciseForm.reps; }
         function adjustNewTime(type,val) { if(type==='min') state.newExerciseForm.min=Math.max(0,state.newExerciseForm.min+val); else state.newExerciseForm.sec=Math.max(0,state.newExerciseForm.sec+val); document.getElementById('new-min-display').innerText=`${state.newExerciseForm.min} min`; document.getElementById('new-sec-display').innerText=`${state.newExerciseForm.sec.toString().padStart(2,'0')} sec`; }
         function addNewExercise() { 
-            // 1. Obtener valores
             const titleInput = document.getElementById('new-title');
             const t = titleInput.value; 
-            
-            // Validación simple
-            if(!t) {
-                alert("Please enter a title for the exercise.");
-                return; 
-            }
-            
+            if(!t) { alert("Please enter a title for the exercise."); return; }
             const sNameInput = document.getElementById('new-stat-name');
             const sName = sNameInput.value;
             const total = (state.newExerciseForm.min * 60) + state.newExerciseForm.sec; 
-            
-            // 2. Crear objeto
             const newExercise = {
-                id: Date.now(),
-                title: t,
-                bpm: state.newExerciseForm.bpm,
-                durationSec: total,
-                remainingSec: total,
-                completed: false,
-                autoStart: document.getElementById('new-autostart').checked,
-                archived: false,
-                reps: state.newExerciseForm.reps,
-                currentRep: 1,
-                statisticName: sName ? sName : null, 
-                statisticLogs: [],
-                comment: "" // Asegurar que exista el campo comentario
+                id: Date.now(), title: t, bpm: state.newExerciseForm.bpm, durationSec: total, remainingSec: total,
+                completed: false, autoStart: document.getElementById('new-autostart').checked, archived: false,
+                reps: state.newExerciseForm.reps, currentRep: 1, statisticName: sName ? sName : null, statisticLogs: [], comment: ""
             };
-
-            // 3. Guardar en estado y LocalStorage
             getCurrentRoutine().exercises.push(newExercise); 
-            saveData(); 
-            
-            // 4. Limpiar los inputs para la próxima vez
-            titleInput.value = '';
-            sNameInput.value = '';
-            
-            // 5. Cerrar modal y actualizar UI
-            toggleModal(false); 
-            updateUI(); 
-            
-            // 6. Scroll al final de la lista para ver el nuevo elemento
-            setTimeout(() => {
-                const list = document.getElementById('exercise-list');
-                list.scrollTop = list.scrollHeight;
-            }, 50);
+            saveData(); titleInput.value = ''; sNameInput.value = ''; 
+            toggleModal(false); updateUI(); 
+            setTimeout(() => { const list = document.getElementById('exercise-list'); list.scrollTop = list.scrollHeight; }, 50);
         }
         function toggleAutoplay(c) { state.autoplayRoutine=c; }
         function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); renderCommentAttachments(v); }
@@ -1011,62 +993,26 @@
             }
         }
         function completeDetailExercise() {
-            const ex = getExerciseById(state.viewingExerciseId); 
-            if (!ex) return;
-
-            // 1. Si requiere estadística y no está completo, abrir modal
+            const ex = getExerciseById(state.viewingExerciseId); if (!ex) return;
             if (ex.statisticName && !ex.completed) {
-                // Preparamos el estado para que el modal sepa qué hacer
-                state.pendingDetailCompletion = true; 
-                state.activeExerciseId = ex.id; // Aseguramos que el ID activo sea este para guardar el dato
-                
-                // Detener audio si estaba sonando este ejercicio
-                if (state.isExercisePlaying) {
-                    state.isExercisePlaying = false; 
-                    state.isAudioOn = false; 
-                    stopMetronomeAudio();
-                    updateUI();
-                }
-
-                // Abrir modal
+                state.pendingDetailCompletion = true; state.activeExerciseId = ex.id; 
+                if (state.isExercisePlaying) { pauseSequence(); }
                 document.getElementById('stat-modal-title').innerText = ex.statisticName;
                 document.getElementById('stat-input-value').value = '';
                 document.getElementById('stat-input-modal').classList.remove('hidden');
                 setTimeout(() => document.getElementById('stat-input-value').focus(), 100);
-                return; // DETENEMOS AQUÍ para esperar el input
+                return;
             }
-
-            // 2. Si no requiere estadística, finalizar directamente
             forceFinishDetail();
         }
-
         function forceFinishDetail() {
-            const ex = getExerciseById(state.viewingExerciseId); 
-            if (!ex) return;
-
-            // Calcular tiempo a sumar
+            const ex = getExerciseById(state.viewingExerciseId); if (!ex) return;
             let timeToAdd = 0;
             if (state.activeExerciseId === ex.id) {
-                timeToAdd = state.exerciseRemaining;
-                // Limpiar estado activo global
-                state.activeExerciseId = null;
-                state.isExercisePlaying = false; 
-                state.isAudioOn = false; 
-                stopMetronomeAudio();
-            } else {
-                timeToAdd = ex.remainingSec;
-            }
-
-            // Guardar progreso y marcar completo
-            state.globalSeconds += timeToAdd; 
-            recordProgressSeconds(timeToAdd);
-            
-            ex.completed = true; 
-            ex.remainingSec = 0; 
-            saveData(); 
-            
-            // Cerrar vista
-            closeDetailsView();
+                timeToAdd = state.exerciseRemaining; pauseSequence();
+            } else { timeToAdd = ex.remainingSec; }
+            state.globalSeconds += timeToAdd; recordProgressSeconds(timeToAdd);
+            ex.completed = true; ex.remainingSec = 0; saveData(); closeDetailsView();
         }
         function toggleDetailsMenu(e) { e.stopPropagation(); document.getElementById('details-menu-dropdown').classList.toggle('hidden'); }
         function handleWindowClick(e) { const m=document.getElementById('details-menu-dropdown'), b=document.getElementById('details-menu-btn'); if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden'); }
@@ -1100,7 +1046,6 @@
             document.getElementById('stat-total-time').innerText = `${Math.floor(totalSecondsAllTime / 3600)}h ${Math.floor((totalSecondsAllTime % 3600) / 60)}m`;
             document.getElementById('stat-streak').innerText = streak;
 
-            // Bar Chart (Last 7 Days)
             const last7DaysLabels = [], last7DaysKeys = [];
             for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); last7DaysKeys.push(d.toISOString().split('T')[0]); last7DaysLabels.push(d.toLocaleDateString('en-US', { weekday: 'short' })); }
             const uniqueRoutines = new Set();
@@ -1115,7 +1060,6 @@
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: {size: 10} } } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
             });
 
-            // Doughnut Chart (Focus)
             const routineTotals = {}; entries.forEach(([_, d]) => { if (d.routines) Object.entries(d.routines).forEach(([n, s]) => routineTotals[n] = (routineTotals[n] || 0) + s); });
             const rLabels = Object.keys(routineTotals), rData = Object.values(routineTotals).map(s => Math.round(s/60));
             if (routineChartInstance) routineChartInstance.destroy();
@@ -1124,7 +1068,6 @@
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } } }
             });
 
-            // NEW: Progress Line Chart (Fixed Date Comparison Logic)
             let allStats = [];
             state.routines.forEach(r => {
                 r.exercises.forEach(e => {
@@ -1134,15 +1077,11 @@
                 });
             });
 
-            // FIXED: Use String comparison for dates (YYYY-MM-DD) to avoid Timezone bugs
-            const startVal = document.getElementById('stat-filter-start').value; // e.g. "2023-10-01"
-            const endVal = document.getElementById('stat-filter-end').value;     // e.g. "2023-10-31"
-
-            // Get all unique dates in range for X-axis labels
+            const startVal = document.getElementById('stat-filter-start').value;
+            const endVal = document.getElementById('stat-filter-end').value;
             let uniqueDates = new Set();
             allStats.forEach(stat => {
                 stat.logs.forEach(log => {
-                    // Check strict string range
                     if (log.date >= startVal && log.date <= endVal) {
                         uniqueDates.add(log.date);
                     }
@@ -1155,38 +1094,21 @@
                     const entry = stat.logs.find(l => l.date === date);
                     return entry ? entry.value : null;
                 });
-                
                 if (data.every(v => v === null)) return null;
-
                 return {
-                    label: stat.name,
-                    data: data,
-                    borderColor: stringToColor(stat.name),
-                    backgroundColor: stringToColor(stat.name),
-                    tension: 0.1,
-                    fill: false,
-                    spanGaps: true
+                    label: stat.name, data: data,
+                    borderColor: stringToColor(stat.name), backgroundColor: stringToColor(stat.name),
+                    tension: 0.1, fill: false, spanGaps: true
                 };
             }).filter(ds => ds !== null);
 
             if (progressChartInstance) progressChartInstance.destroy();
             progressChartInstance = new Chart(document.getElementById('progressChart').getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: sortedDates,
-                    datasets: progressDatasets
-                },
+                type: 'line', data: { labels: sortedDates, datasets: progressDatasets },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: {size: 10} } },
-                        tooltip: { mode: 'index', intersect: false }
-                    },
-                    scales: {
-                        x: { title: { display: true, text: 'Date' } },
-                        y: { title: { display: true, text: 'Value' }, beginAtZero: true }
-                    }
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: {size: 10} } }, tooltip: { mode: 'index', intersect: false } },
+                    scales: { x: { title: { display: true, text: 'Date' } }, y: { title: { display: true, text: 'Value' }, beginAtZero: true } }
                 }
             });
         }
