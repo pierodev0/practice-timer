@@ -469,13 +469,17 @@
         }
 
         // --- APP LOGIC ---
-        function saveData() {
+       function saveData() {
             if(state.activeExerciseId) {
                 const ex = getExerciseById(state.activeExerciseId);
                 if(ex) ex.remainingSec = state.exerciseRemaining;
             }
+            // CAMBIO AQUÍ: Agregamos globalSeconds al guardado
             localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                routines: state.routines, currentRoutineId: state.currentRoutineId, stats: state.stats
+                routines: state.routines, 
+                currentRoutineId: state.currentRoutineId, 
+                stats: state.stats,
+                globalSeconds: state.globalSeconds // <--- NUEVO
             }));
         }
 
@@ -487,6 +491,10 @@
                     state.routines = parsed.routines;
                     state.currentRoutineId = parsed.currentRoutineId || 'default';
                     state.stats = parsed.stats || {};
+                    
+                    // CAMBIO AQUÍ: Recuperamos el tiempo o empezamos en 0 si no existe
+                    state.globalSeconds = parsed.globalSeconds || 0; 
+
                     state.routines.forEach(r => r.exercises.forEach(ex => {
                         if (ex.durationSec === undefined && ex.duration !== undefined) { ex.durationSec = ex.duration * 60; delete ex.duration; }
                         if (ex.remainingSec === undefined) ex.remainingSec = ex.durationSec;
@@ -569,17 +577,21 @@
         }
 
         window.onload = function() {
-            loadData();
-            new Sortable(document.getElementById('exercise-list'), {
-                animation: 150, delay: 300, delayOnTouchOnly: true, handle: '.draggable-item',
-                onEnd: function (evt) {
-                    const routine = getCurrentRoutine();
-                    routine.exercises.splice(evt.newIndex, 0, routine.exercises.splice(evt.oldIndex, 1)[0]);
-                    saveData();
-                }
-            });
-            updateUI();
-        };
+        loadData();
+        
+        // CAMBIO AQUÍ: Guardar todo justo antes de salir o recargar
+        window.addEventListener('beforeunload', () => saveData()); 
+
+        new Sortable(document.getElementById('exercise-list'), {
+            animation: 150, delay: 300, delayOnTouchOnly: true, handle: '.draggable-item',
+            onEnd: function (evt) {
+                const routine = getCurrentRoutine();
+                routine.exercises.splice(evt.newIndex, 0, routine.exercises.splice(evt.oldIndex, 1)[0]);
+                saveData();
+            }
+        });
+        updateUI();
+    };
 
         function finishAndResetRoutine() {
             if(!confirm("Finish routine? This resets exercises.")) return;
