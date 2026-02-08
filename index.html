@@ -131,7 +131,7 @@
                         <input type="checkbox" id="autoplay-toggle" onchange="toggleAutoplay(this.checked)" class="accent-white w-3 h-3">
                         <span class="font-medium text-white/90">Autoplay</span>
                     </label>
-                    <div class="flex gap-2">
+                    <div class="flex gap-2 flex-col sm:flex-row">
                         <button onclick="finishAndResetRoutine()" class="bg-white text-[#E53935] text-xs px-3 py-1 rounded shadow-sm font-bold hover:bg-white/90 transition-colors">
                             <i class="fas fa-flag-checkered mr-1"></i> FINISH
                         </button>
@@ -452,7 +452,7 @@
             bellSynth.set({
                 oscillator: { type: "sine" },
                 envelope: { attack: 0.05, decay: 0.6, sustain: 0.1, release: 0.8 },
-                volume: -18,
+                volume: -5,
             });
             bellSynth.triggerAttackRelease(["C5", "E5", "G5"], "2n");
         }
