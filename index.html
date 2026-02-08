@@ -1,10 +1,15 @@
-<!DOCTYPE html.
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Music Routine App v36 - Edit Stats</title>
+    <title>Music Routine App v36 - PWA</title>
     
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#E53935">
+    <link rel="icon" type="image/x-icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
@@ -52,7 +57,7 @@
                 <button onclick="document.getElementById('edit-stats-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
             </div>
             <div id="edit-stats-list" class="overflow-y-auto p-4 space-y-2 flex-1 bg-gray-50/50">
-                </div>
+            </div>
             <div class="p-3 border-t border-gray-100 text-center">
                 <button onclick="document.getElementById('edit-stats-modal').classList.add('hidden')" class="text-sm text-[#E53935] font-medium">Close</button>
             </div>
@@ -348,782 +353,794 @@
         </div>
     </div>
 <script>
-        // --- DATA & STATE ---
-        const initialExercises = [
-            { id: 1, title: 'Major Scale', bpm: 80, durationSec: 10, remainingSec: 10, completed: false, autoStart: true, archived: false, reps: 1, currentRep: 1, comment: "Sheet Music: https://jtgt-static.b-cdn.net/images/modules/INT1/IM-113-MajorScale-P1.jpg", statisticName: null, statisticLogs: [] },
-            { id: 2, title: 'One Minute Changes', bpm: 120, durationSec: 60, remainingSec: 60, completed: false, autoStart: false, archived: false, reps: 1, currentRep: 1, comment: "G to C changes", statisticName: "Chord Changes", statisticLogs: [] }
-        ];
-
-        let state = {
-            isExercisePlaying: false, isAudioOn: false, bpm: 120, globalSeconds: 0,
-            activeExerciseId: null, exerciseRemaining: 0, viewingExerciseId: null,
-            autoplayRoutine: false, 
-            pendingDetailCompletion: false,
-            routines: [{ id: 'default', name: 'Rutina 1', exercises: JSON.parse(JSON.stringify(initialExercises)) }],
-            currentRoutineId: 'default',
-            newExerciseForm: { bpm: 100, min: 2, sec: 0, reps: 1 },
-            stats: {}
-        };
-
-        const STORAGE_KEY = 'musicRoutineApp_v36_stats';
-
-        // --- WEB WORKER SETUP (HILO EN SEGUNDO PLANO) ---
-        // Creamos el worker como un Blob para no necesitar archivos externos
-        const workerCode = `
-            let intervalId;
-            self.onmessage = function(e) {
-                if (e.data === 'start') {
-                    if (!intervalId) {
-                        intervalId = setInterval(() => {
-                            self.postMessage('tick');
-                        }, 1000);
-                    }
-                } else if (e.data === 'stop') {
-                    clearInterval(intervalId);
-                    intervalId = null;
-                }
-            };
-        `;
-        
-        const blob = new Blob([workerCode], { type: "application/javascript" });
-        const worker = new Worker(URL.createObjectURL(blob));
-
-        // Esta función recibe el 'tick' del worker cada segundo, sin importar si la pestaña está oculta
-        worker.onmessage = function(e) {
-            if (e.data === 'tick' && state.isExercisePlaying) {
-                // 1. Lógica del tiempo
-                state.globalSeconds++;
-                recordProgressSeconds(1);
-
-                if (state.activeExerciseId && state.exerciseRemaining > 0) {
-                    state.exerciseRemaining--;
-                    const ex = getExerciseById(state.activeExerciseId); 
-                    if(ex) ex.remainingSec = state.exerciseRemaining;
-                    
-                    if (state.exerciseRemaining <= 0) {
-                        handleExerciseCompletion();
-                    }
-                }
-
-                // 2. Actualizar UI
-                requestAnimationFrame(() => {
-                    document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
-                    if (state.activeExerciseId) {
-                        renderExercises(); 
-                        if(state.viewingExerciseId === state.activeExerciseId) {
-                            document.getElementById('detail-time-display').innerText = formatTime(state.exerciseRemaining);
-                        }
-                    }
-                });
-            }
-        };
-
-        // --- TONE.JS SETUP (SOLO AUDIO) ---
-        let metroSynth, bellSynth;
-        let beat = 0;
-
-        async function initAudio() {
-            await Tone.start();
-            
-            if (!metroSynth) {
-                metroSynth = new Tone.Synth({
-                    oscillator: { type: "sine" },
-                    envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
-                }).toDestination();
-
-                bellSynth = new Tone.PolySynth(Tone.Synth, {
-                    oscillator: { type: "sine" },
-                    envelope: { attack: 0.01, decay: 1, sustain: 0, release: 1 }
-                }).toDestination();
-                
-                // El metrónomo musical sigue usando Tone.Transport para precisión de ritmo
-                Tone.Transport.scheduleRepeat((time) => {
-                    if (state.isAudioOn) {
-                        const freq = beat === 0 ? "C6" : "G5";
-                        metroSynth.triggerAttackRelease(freq, "32n", time);
-                    }
-                    beat = (beat + 1) % 4;
-                }, "4n");
-            }
-        }
-
-        function playBellSound() {
-            if (!bellSynth) return;
-            bellSynth.set({
-                oscillator: { type: "sine" },
-                envelope: { attack: 0.05, decay: 0.6, sustain: 0.1, release: 0.8 },
-                volume: -5,
-            });
-            bellSynth.triggerAttackRelease(["C5", "E5", "G5"], "2n");
-        }
-
-        function startMetronomeAudio() {
-            beat = 0;
-            Tone.Transport.bpm.value = state.bpm;
-            if(Tone.Transport.state !== 'started') Tone.Transport.start();
-        }
-
-        function stopMetronomeAudio() {
-            Tone.Transport.stop();
-            beat = 0;
-        }
-
-        // --- APP LOGIC ---
-       function saveData() {
-            if(state.activeExerciseId) {
-                const ex = getExerciseById(state.activeExerciseId);
-                if(ex) ex.remainingSec = state.exerciseRemaining;
-            }
-            // CAMBIO AQUÍ: Agregamos globalSeconds al guardado
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                routines: state.routines, 
-                currentRoutineId: state.currentRoutineId, 
-                stats: state.stats,
-                globalSeconds: state.globalSeconds // <--- NUEVO
-            }));
-        }
-
-        function loadData() {
-            const data = localStorage.getItem(STORAGE_KEY);
-            if (data) {
-                try {
-                    const parsed = JSON.parse(data);
-                    state.routines = parsed.routines;
-                    state.currentRoutineId = parsed.currentRoutineId || 'default';
-                    state.stats = parsed.stats || {};
-                    
-                    // CAMBIO AQUÍ: Recuperamos el tiempo o empezamos en 0 si no existe
-                    state.globalSeconds = parsed.globalSeconds || 0; 
-
-                    state.routines.forEach(r => r.exercises.forEach(ex => {
-                        if (ex.durationSec === undefined && ex.duration !== undefined) { ex.durationSec = ex.duration * 60; delete ex.duration; }
-                        if (ex.remainingSec === undefined) ex.remainingSec = ex.durationSec;
-                        ex.autoStart = ex.autoStart ?? true; ex.archived = ex.archived ?? false;
-                        ex.reps = ex.reps ?? 1; ex.currentRep = ex.currentRep ?? 1; ex.comment = ex.comment ?? "";
-                        ex.statisticName = ex.statisticName || null;
-                        ex.statisticLogs = ex.statisticLogs || [];
-                    }));
-                } catch (e) { console.error("Error loading data", e); }
-            }
-            
-            const end = new Date();
-            const start = new Date();
-            start.setDate(end.getDate() - 30);
-            document.getElementById('stat-filter-start').value = start.toISOString().split('T')[0];
-            document.getElementById('stat-filter-end').value = end.toISOString().split('T')[0];
-        }
-
-        function updateExerciseTitle(newTitle) {
-            const ex = getExerciseById(state.viewingExerciseId);
-            if(ex) { ex.title = newTitle; saveData(); renderExercises(); }
-        }
-
-        function updateDetailStatName(newVal) {
-            const ex = getExerciseById(state.viewingExerciseId);
-            if(ex) { 
-                ex.statisticName = newVal.trim() === "" ? null : newVal; 
-                saveData(); 
-                renderExercises(); 
-            }
-        }
-
-        function recordProgressSeconds(seconds) {
-            const today = new Date().toISOString().split('T')[0];
-            if (!state.stats[today]) state.stats[today] = { totalSec: 0, routines: {} };
-            state.stats[today].totalSec = Math.max(0, state.stats[today].totalSec + seconds);
-            const currentR = getCurrentRoutine();
-            if (currentR) {
-                if (!state.stats[today].routines[currentR.name]) state.stats[today].routines[currentR.name] = 0;
-                state.stats[today].routines[currentR.name] = Math.max(0, state.stats[today].routines[currentR.name] + seconds);
-            }
-        }
-
-        function getFirstUrl(text) { return (text.match(/(https?:\/\/[^\s]+)/i) || [])[0]; }
-        function getFirstImage(text) { return (text.match(/(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/i) || [])[0]; }
-
-        function renderCommentAttachments(text) {
-            const imgContainer = document.getElementById('detail-image-preview');
-            const linkContainer = document.getElementById('detail-link-list');
-            imgContainer.innerHTML = ''; linkContainer.innerHTML = '';
-            if (!text) return;
-            
-            const images = text.match(/(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/ig) || [];
-            images.forEach(url => {
-                const img = document.createElement('img');
-                img.src = url; img.className = "w-20 h-20 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition shadow-sm bg-gray-50";
-                img.onclick = () => openImageModal(url); img.onerror = () => img.style.display = 'none';
-                imgContainer.appendChild(img);
-            });
-
-            const allLinks = text.match(/(https?:\/\/[^\s]+)/ig) || [];
-            allLinks.forEach(url => {
-                if(!images.includes(url)) {
-                    const btn = document.createElement('a');
-                    btn.href = url; btn.target = "_blank";
-                    btn.className = "flex items-center gap-2 text-[#E53935] hover:underline bg-red-50 p-2 rounded text-sm w-fit max-w-full truncate";
-                    btn.innerHTML = `<i class="fas fa-link"></i> <span class="truncate">${url}</span>`;
-                    linkContainer.appendChild(btn);
-                }
-            });
-        }
-
-        function openImageModal(url) {
-            const modal = document.getElementById('image-lightbox'), img = document.getElementById('lightbox-img');
-            img.src = url; modal.classList.remove('hidden'); setTimeout(() => img.classList.remove('scale-95'), 10);
-        }
-        function closeImageModal() {
-            const modal = document.getElementById('image-lightbox'), img = document.getElementById('lightbox-img');
-            img.classList.add('scale-95'); setTimeout(() => modal.classList.add('hidden'), 200);
-        }
-
-        window.onload = function() {
-        loadData();
-        
-        // CAMBIO AQUÍ: Guardar todo justo antes de salir o recargar
-        window.addEventListener('beforeunload', () => saveData()); 
-
-        new Sortable(document.getElementById('exercise-list'), {
-            animation: 150, delay: 300, delayOnTouchOnly: true, handle: '.draggable-item',
-            onEnd: function (evt) {
-                const routine = getCurrentRoutine();
-                routine.exercises.splice(evt.newIndex, 0, routine.exercises.splice(evt.oldIndex, 1)[0]);
-                saveData();
-            }
+    // --- PWA REGISTRATION ---
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('Service Worker registered', reg))
+                .catch(err => console.log('Service Worker failed', err));
         });
-        updateUI();
-    };
+    }
 
-        function finishAndResetRoutine() {
-            if(!confirm("Finish routine? This resets exercises.")) return;
-            pauseSequence();
-            state.activeExerciseId = null; state.exerciseRemaining = 0; state.globalSeconds = 0;
-            getCurrentRoutine().exercises.forEach(e => { e.completed = false; e.remainingSec = e.durationSec; e.currentRep = 1; });
-            saveData(); updateUI(); alert("Routine Completed!");
-        }
+    // --- (AQUÍ PEGA TODO TU JAVASCRIPT ORIGINAL DE DATA & STATE HACIA ABAJO) ---
+    // ... Copia todo desde const initialExercises ...
+    
+       // --- DATA & STATE ---
+       const initialExercises = [
+           { id: 1, title: 'Major Scale', bpm: 80, durationSec: 10, remainingSec: 10, completed: false, autoStart: true, archived: false, reps: 1, currentRep: 1, comment: "Sheet Music: https://jtgt-static.b-cdn.net/images/modules/INT1/IM-113-MajorScale-P1.jpg", statisticName: null, statisticLogs: [] },
+           { id: 2, title: 'One Minute Changes', bpm: 120, durationSec: 60, remainingSec: 60, completed: false, autoStart: false, archived: false, reps: 1, currentRep: 1, comment: "G to C changes", statisticName: "Chord Changes", statisticLogs: [] }
+       ];
 
-        function sanitizeImportedRoutine(r) {
-            return {
-                id: Date.now() + Math.random().toString(), name: r.name + " (Import)",
-                exercises: (r.exercises||[]).map(ex => ({
-                    id: Date.now() + Math.floor(Math.random()*100000), title: ex.title||"Untitled", bpm: ex.bpm||100,
-                    durationSec: ex.durationSec||60, remainingSec: ex.durationSec||60, completed: false,
-                    autoStart: ex.autoStart??true, archived: !!ex.archived, reps: ex.reps||1, currentRep: 1, comment: ex.comment||"",
-                    statisticName: ex.statisticName||null, statisticLogs: ex.statisticLogs||[]
-                }))
-            };
-        }
-        function triggerSmartImport() { document.getElementById('import-smart-input').click(); }
-        function importSmartRoutines(input) {
-            if(!input.files[0]) return;
-            const r = new FileReader();
-            r.onload = (e) => {
-                try {
-                    const json = JSON.parse(e.target.result);
-                    const toAdd = (Array.isArray(json) ? json : [json]).map(sanitizeImportedRoutine);
-                    state.routines.push(...toAdd); saveData(); renderSidebarRoutines(); toggleSidebar(true); alert(`Imported ${toAdd.length}`);
-                } catch(err){ alert("Error: "+err.message); }
-            };
-            r.readAsText(input.files[0]); input.value='';
-        }
-        function triggerFullRestore() { document.getElementById('import-full-input').click(); }
-        function restoreAllRoutines(input) {
-            if(!input.files[0] || !confirm("Overwrite all?")) return;
-            const r = new FileReader();
-            r.onload = (e) => {
-                try {
-                    const json = JSON.parse(e.target.result);
-                    state.routines = json.routines || (Array.isArray(json)?json:[]);
-                    state.stats = json.stats || state.stats;
-                    state.currentRoutineId = state.routines[0]?.id || 'default';
-                    saveData(); resetRoutineLogic(); updateUI(); toggleSidebar(false); alert("Restored!");
-                } catch(e){alert("Error");}
-            };
-            r.readAsText(input.files[0]); input.value='';
-        }
-        function exportRoutines() { downloadJSON(JSON.stringify({routines:state.routines,stats:state.stats},null,2), `backup_${new Date().toISOString().slice(0,10)}.json`); }
-        function exportSingleRoutine(id) {
-            const r = state.routines.find(x=>x.id===id); if(r) downloadJSON(JSON.stringify(r,null,2), `routine_${r.name.replace(/\W/g,'_')}.json`);
-        }
-        function downloadJSON(c,n) { const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([c],{type:"application/json"})); a.download=n; a.click(); }
+       let state = {
+           isExercisePlaying: false, isAudioOn: false, bpm: 120, globalSeconds: 0,
+           activeExerciseId: null, exerciseRemaining: 0, viewingExerciseId: null,
+           autoplayRoutine: false, 
+           pendingDetailCompletion: false,
+           routines: [{ id: 'default', name: 'Rutina 1', exercises: JSON.parse(JSON.stringify(initialExercises)) }],
+           currentRoutineId: 'default',
+           newExerciseForm: { bpm: 100, min: 2, sec: 0, reps: 1 },
+           stats: {}
+       };
 
-        // Audio & Playback
-        function toggleGlobalAudioOnly() {
-            state.isAudioOn = !state.isAudioOn;
-            if (state.isAudioOn) { 
-                initAudio().then(startMetronomeAudio); 
-            } else { 
-                stopMetronomeAudio();
-            }
-            updateUI();
-        }
-        function adjustGlobalBPM(val) {
-            state.bpm = Math.max(1, Math.min(300, state.bpm + val));
-            if(state.activeExerciseId) { const ex = getExerciseById(state.activeExerciseId); if(ex) ex.bpm = state.bpm; }
-            Tone.Transport.bpm.value = state.bpm;
-            updateUI();
-        }
-        function toggleListExercise(id) {
-            if (state.activeExerciseId === id && state.isExercisePlaying) pauseSequence(); else playExercise(id);
-        }
-        function playExercise(id) {
-            const ex = getExerciseById(id); if (!ex) return;
-            if (state.activeExerciseId && state.activeExerciseId !== id) {
-                const prev = getExerciseById(state.activeExerciseId); if(prev) prev.remainingSec = state.exerciseRemaining;
-            }
-            state.activeExerciseId = id;
-            state.exerciseRemaining = (ex.remainingSec <= 0) ? ex.durationSec : ex.remainingSec;
-            state.bpm = ex.bpm; 
-            state.isExercisePlaying = true;
-            
-            // Iniciamos el worker (reloj del sistema)
-            worker.postMessage('start');
+       const STORAGE_KEY = 'musicRoutineApp_v36_stats';
 
-            initAudio().then(() => {
-                Tone.Transport.bpm.value = state.bpm;
-                if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); } 
-                else { state.isAudioOn = false; stopMetronomeAudio(); }
-            });
-            updateUI(); saveData();
-        }
-        function pauseSequence() {
-            if (state.activeExerciseId) { const ex = getExerciseById(state.activeExerciseId); if(ex) ex.remainingSec = state.exerciseRemaining; }
-            state.isExercisePlaying = false; 
-            state.isAudioOn = false; 
-            
-            // Detenemos worker y audio
-            worker.postMessage('stop');
-            stopMetronomeAudio(); 
-            
-            saveData(); updateUI();
-        }
-        
-        // --- NEW STATISTIC LOGIC ---
-        function submitStatInput() {
-            const val = parseFloat(document.getElementById('stat-input-value').value);
-            if (!isNaN(val)) {
-                const ex = getExerciseById(state.activeExerciseId);
-                if (ex) {
-                    const today = new Date().toISOString().split('T')[0];
-                    if(!ex.statisticLogs) ex.statisticLogs = [];
-                    ex.statisticLogs.push({ date: today, value: val });
-                    saveData();
-                }
-            }
-            closeStatModalAndFinish();
-        }
+       // --- WEB WORKER SETUP (HILO EN SEGUNDO PLANO) ---
+       // Creamos el worker como un Blob para no necesitar archivos externos
+       const workerCode = `
+           let intervalId;
+           self.onmessage = function(e) {
+               if (e.data === 'start') {
+                   if (!intervalId) {
+                       intervalId = setInterval(() => {
+                           self.postMessage('tick');
+                       }, 1000);
+                   }
+               } else if (e.data === 'stop') {
+                   clearInterval(intervalId);
+                   intervalId = null;
+               }
+           };
+       `;
+       
+       const blob = new Blob([workerCode], { type: "application/javascript" });
+       const worker = new Worker(URL.createObjectURL(blob));
 
-        function skipStatInput() {
-            closeStatModalAndFinish();
-        }
+       // Esta función recibe el 'tick' del worker cada segundo, sin importar si la pestaña está oculta
+       worker.onmessage = function(e) {
+           if (e.data === 'tick' && state.isExercisePlaying) {
+               // 1. Lógica del tiempo
+               state.globalSeconds++;
+               recordProgressSeconds(1);
 
-       function closeStatModalAndFinish() {
-            document.getElementById('stat-input-modal').classList.add('hidden');
-            
-            if (state.pendingDetailCompletion) {
-                state.pendingDetailCompletion = false; 
-                forceFinishDetail(); 
-            } else {
-                finalizeCompletion(false); 
-            }
-        }
-        
-        function handleExerciseCompletion() {
-            // Esta función se llama desde el worker, aseguramos que el contexto de audio esté activo para el sonido
-            const ex = getExerciseById(state.activeExerciseId); if (!ex) return;
-            
-            playBellSound();
-            
-            if (ex.statisticName && !ex.completed) {
-                pauseSequence(); // Esto detiene el worker y el audio
-                
-                document.getElementById('stat-modal-title').innerText = ex.statisticName;
-                document.getElementById('stat-input-value').value = '';
-                document.getElementById('stat-input-modal').classList.remove('hidden');
-                setTimeout(() => document.getElementById('stat-input-value').focus(), 100);
-                return; 
-            }
-            
-            finalizeCompletion(false);
-        }
+               if (state.activeExerciseId && state.exerciseRemaining > 0) {
+                   state.exerciseRemaining--;
+                   const ex = getExerciseById(state.activeExerciseId); 
+                   if(ex) ex.remainingSec = state.exerciseRemaining;
+                   
+                   if (state.exerciseRemaining <= 0) {
+                       handleExerciseCompletion();
+                   }
+               }
 
-        function finalizeCompletion(playSound = true) {
-            const ex = getExerciseById(state.activeExerciseId);
-            
-            if (playSound) playBellSound();
-            
-            if (ex.currentRep < ex.reps) {
-                ex.currentRep++; state.exerciseRemaining = ex.durationSec; ex.remainingSec = ex.durationSec;
-                state.isExercisePlaying = true;
-                
-                // Reiniciar worker para asegurar timing fresco
-                worker.postMessage('stop');
-                worker.postMessage('start');
-                
-                if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); }
-                updateUI(); saveData();
-            } else {
-                pauseSequence();
-                ex.completed = true; ex.remainingSec = 0; saveData(); updateUI();
-                if (state.autoplayRoutine) {
-                    const routine = getCurrentRoutine();
-                    const activeList = routine.exercises.filter(e => !e.archived);
-                    const idx = activeList.findIndex(e => e.id === state.activeExerciseId);
-                    if (idx < activeList.length - 1) setTimeout(() => playExercise(activeList[idx+1].id), 1500);
-                    else finishAndResetRoutine();
-                }
-            }
-        }
+               // 2. Actualizar UI
+               requestAnimationFrame(() => {
+                   document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
+                   if (state.activeExerciseId) {
+                       renderExercises(); 
+                       if(state.viewingExerciseId === state.activeExerciseId) {
+                           document.getElementById('detail-time-display').innerText = formatTime(state.exerciseRemaining);
+                       }
+                   }
+               });
+           }
+       };
 
-        // --- EDIT STATS LOGIC ---
-        function openEditStatsModal() {
-            const list = document.getElementById('edit-stats-list');
-            list.innerHTML = '';
-            
-            let allLogs = [];
-            state.routines.forEach(r => {
-                r.exercises.forEach(e => {
-                    if (e.statisticLogs && e.statisticLogs.length > 0) {
-                        e.statisticLogs.forEach((log, index) => {
-                            allLogs.push({
-                                routineId: r.id, exerciseId: e.id, index: index,
-                                title: e.title, statName: e.statisticName || "Stat",
-                                date: log.date, value: log.value
-                            });
-                        });
-                    }
-                });
-            });
+       // --- TONE.JS SETUP (SOLO AUDIO) ---
+       let metroSynth, bellSynth;
+       let beat = 0;
 
-            allLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
+       async function initAudio() {
+           await Tone.start();
+           
+           if (!metroSynth) {
+               metroSynth = new Tone.Synth({
+                   oscillator: { type: "sine" },
+                   envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
+               }).toDestination();
 
-            if (allLogs.length === 0) {
-                list.innerHTML = '<div class="text-center text-gray-400 py-8">No statistics recorded yet.</div>';
-            } else {
-                allLogs.forEach(item => {
-                    const div = document.createElement('div');
-                    div.className = "bg-white p-3 rounded shadow-sm border border-gray-100 flex justify-between items-center";
-                    div.innerHTML = `
-                        <div>
-                            <div class="text-xs text-gray-400 font-bold">${item.date}</div>
-                            <div class="font-medium text-gray-700 leading-tight">${item.title}</div>
-                            <div class="text-xs text-[#E53935]">${item.statName}: <span class="font-bold text-lg text-gray-800 ml-1">${item.value}</span></div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button onclick="editStatValue('${item.routineId}', ${item.exerciseId}, ${item.index})" class="w-8 h-8 rounded-full bg-blue-50 text-blue-500 hover:bg-blue-100 flex items-center justify-center transition-colors"><i class="fas fa-pencil-alt text-xs"></i></button>
-                            <button onclick="deleteStatLog('${item.routineId}', ${item.exerciseId}, ${item.index})" class="w-8 h-8 rounded-full bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors"><i class="fas fa-trash text-xs"></i></button>
-                        </div>
-                    `;
-                    list.appendChild(div);
-                });
-            }
-            document.getElementById('edit-stats-modal').classList.remove('hidden');
-        }
+               bellSynth = new Tone.PolySynth(Tone.Synth, {
+                   oscillator: { type: "sine" },
+                   envelope: { attack: 0.01, decay: 1, sustain: 0, release: 1 }
+               }).toDestination();
+               
+               // El metrónomo musical sigue usando Tone.Transport para precisión de ritmo
+               Tone.Transport.scheduleRepeat((time) => {
+                   if (state.isAudioOn) {
+                       const freq = beat === 0 ? "C6" : "G5";
+                       metroSynth.triggerAttackRelease(freq, "32n", time);
+                   }
+                   beat = (beat + 1) % 4;
+               }, "4n");
+           }
+       }
 
-        function editStatValue(rId, eId, index) {
-            const r = state.routines.find(x => x.id == rId);
-            const e = r.exercises.find(x => x.id == eId);
-            const log = e.statisticLogs[index];
-            
-            const newVal = prompt(`Edit value for ${e.title} on ${log.date}:`, log.value);
-            if (newVal !== null && newVal.trim() !== "") {
-                const num = parseFloat(newVal);
-                if (!isNaN(num)) {
-                    log.value = num;
-                    saveData();
-                    openEditStatsModal(); renderStats(); renderExercises();
-                } else {
-                    alert("Please enter a valid number.");
-                }
-            }
-        }
+       function playBellSound() {
+           if (!bellSynth) return;
+           bellSynth.set({
+               oscillator: { type: "sine" },
+               envelope: { attack: 0.05, decay: 0.6, sustain: 0.1, release: 0.8 },
+               volume: -5,
+           });
+           bellSynth.triggerAttackRelease(["C5", "E5", "G5"], "2n");
+       }
 
-        function deleteStatLog(rId, eId, index) {
-            if(confirm("Are you sure you want to delete this record?")) {
-                const r = state.routines.find(x => x.id == rId);
-                const e = r.exercises.find(x => x.id == eId);
-                e.statisticLogs.splice(index, 1);
-                saveData();
-                openEditStatsModal(); renderStats(); renderExercises();
-            }
-        }
+       function startMetronomeAudio() {
+           beat = 0;
+           Tone.Transport.bpm.value = state.bpm;
+           if(Tone.Transport.state !== 'started') Tone.Transport.start();
+       }
 
-        // --- SAFE ROUTINE GETTER (CRASH FIX) ---
-        function getCurrentRoutine() {
-            let routine = state.routines.find(r => r.id === state.currentRoutineId);
-            if (!routine) {
-                console.warn("Rutina actual no encontrada, reseteando a la primera disponible.");
-                if (state.routines.length > 0) {
-                    state.currentRoutineId = state.routines[0].id;
-                    routine = state.routines[0];
-                } else {
-                    routine = { id: 'default-' + Date.now(), name: 'Rutina Recuperada', exercises: [] };
-                    state.routines = [routine];
-                    state.currentRoutineId = routine.id;
-                }
-                saveData();
-            }
-            return routine;
-        }
-        function getExerciseById(id) { return getCurrentRoutine().exercises.find(e => e.id === id); }
-        
-        // --- UI RENDERERS ---
-        function updateUI() {
-            renderExercises();
-            document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
-            document.getElementById('global-bpm-display').innerText = `${state.bpm} BPM`;
-            document.getElementById('current-routine-title').innerText = getCurrentRoutine().name;
-            const icon = document.getElementById('global-play-icon'), btn = document.getElementById('global-play-btn');
-            if (state.isAudioOn) { icon.className = "fas fa-pause text-3xl text-white"; btn.classList.add('bg-white/40'); } 
-            else { icon.className = "fas fa-play text-3xl text-white pl-1"; btn.classList.remove('bg-white/40'); }
-        }
+       function stopMetronomeAudio() {
+           Tone.Transport.stop();
+           beat = 0;
+       }
 
-        function renderExercises() {
-            const list = document.getElementById('exercise-list'); list.innerHTML = '';
-            const currentRoutine = getCurrentRoutine(); if(!currentRoutine) return;
-            const visibleExercises = currentRoutine.exercises.filter(e => !e.archived);
-            document.getElementById('total-routine-time').innerText = formatTime(visibleExercises.reduce((acc, curr) => acc + (curr.durationSec * curr.reps), 0));
+       // --- APP LOGIC ---
+      function saveData() {
+           if(state.activeExerciseId) {
+               const ex = getExerciseById(state.activeExerciseId);
+               if(ex) ex.remainingSec = state.exerciseRemaining;
+           }
+           // CAMBIO AQUÍ: Agregamos globalSeconds al guardado
+           localStorage.setItem(STORAGE_KEY, JSON.stringify({
+               routines: state.routines, 
+               currentRoutineId: state.currentRoutineId, 
+               stats: state.stats,
+               globalSeconds: state.globalSeconds // <--- NUEVO
+           }));
+       }
 
-            visibleExercises.forEach(ex => {
-                const isActive = ex.id === state.activeExerciseId;
-                const isTimerRunning = isActive && state.isExercisePlaying;
-                let progressPercent = 0;
-                const currentRemaining = isActive ? state.exerciseRemaining : ex.remainingSec;
-                let timeText = `${formatTime(currentRemaining)}/${formatTime(ex.durationSec)}`;
-                if (ex.completed) { progressPercent = 100; timeText = `${formatTime(ex.durationSec)}/${formatTime(ex.durationSec)}`; } 
-                else if(ex.durationSec > 0) { progressPercent = ((ex.durationSec - currentRemaining) / ex.durationSec) * 100; }
+       function loadData() {
+           const data = localStorage.getItem(STORAGE_KEY);
+           if (data) {
+               try {
+                   const parsed = JSON.parse(data);
+                   state.routines = parsed.routines;
+                   state.currentRoutineId = parsed.currentRoutineId || 'default';
+                   state.stats = parsed.stats || {};
+                   
+                   // CAMBIO AQUÍ: Recuperamos el tiempo o empezamos en 0 si no existe
+                   state.globalSeconds = parsed.globalSeconds || 0; 
 
-                const repsBadge = ex.reps > 1 ? `<span class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded font-bold ml-2">Rep ${ex.currentRep}/${ex.reps}</span>` : '';
-                let statBadge = '';
-                if (ex.statisticName) {
-                    let valText = '';
-                    if (ex.statisticLogs && ex.statisticLogs.length > 0) {
-                        valText = `: <span class="font-bold">${ex.statisticLogs[ex.statisticLogs.length - 1].value}</span>`;
-                    }
-                    statBadge = `<span class="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded ml-2 border border-purple-200"><i class="fas fa-chart-bar mr-1"></i>${ex.statisticName}${valText}</span>`;
-                }
-                
-                const startBtnClass = isTimerRunning ? "bg-[#E53935] text-white border-none" : "btn-secondary";
-                const imgUrl = getFirstImage(ex.comment), anyUrl = getFirstUrl(ex.comment);
-                let rightContent = '';
-                if(imgUrl) rightContent += `<img src="${imgUrl}" class="w-12 h-12 flex-shrink-0 object-cover rounded border border-gray-200 bg-gray-50 shadow-sm cursor-zoom-in hover:opacity-80 transition ml-2" onclick="event.stopPropagation(); openImageModal('${imgUrl}')" onerror="this.style.display='none'">`;
-                if(anyUrl) rightContent += `<button onclick="event.stopPropagation(); window.open('${anyUrl}', '_blank')" class="w-10 h-10 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-[#E53935] hover:bg-gray-100 rounded-full transition ml-1"><i class="fas fa-external-link-alt"></i></button>`;
+                   state.routines.forEach(r => r.exercises.forEach(ex => {
+                       if (ex.durationSec === undefined && ex.duration !== undefined) { ex.durationSec = ex.duration * 60; delete ex.duration; }
+                       if (ex.remainingSec === undefined) ex.remainingSec = ex.durationSec;
+                       ex.autoStart = ex.autoStart ?? true; ex.archived = ex.archived ?? false;
+                       ex.reps = ex.reps ?? 1; ex.currentRep = ex.currentRep ?? 1; ex.comment = ex.comment ?? "";
+                       ex.statisticName = ex.statisticName || null;
+                       ex.statisticLogs = ex.statisticLogs || [];
+                   }));
+               } catch (e) { console.error("Error loading data", e); }
+           }
+           
+           const end = new Date();
+           const start = new Date();
+           start.setDate(end.getDate() - 30);
+           document.getElementById('stat-filter-start').value = start.toISOString().split('T')[0];
+           document.getElementById('stat-filter-end').value = end.toISOString().split('T')[0];
+       }
 
-                list.innerHTML += `
-                    <div class="draggable-item rounded-xl relative overflow-hidden transition-all shadow-sm border border-gray-100 mb-4 ${ex.completed ? 'bg-[#D1FAE5] border-green-200' : isActive ? 'bg-[#E0F2F1] border-green-100 scale-[1.02]' : 'bg-white'}">
-                        <div class="absolute inset-0 bg-[rgba(0,200,83,0.2)] z-0 progress-bar-fill" style="width: ${progressPercent}%"></div>
-                        <div class="flex items-center justify-between relative z-10 pr-2">
-                            <div class="flex items-center gap-4 flex-1 p-4" onclick="${!ex.completed ? `toggleListExercise(${ex.id})` : ''}">
-                                <div class="w-16 h-14 rounded-lg flex items-center justify-center font-bold text-lg transition-colors z-20 flex-shrink-0 ${ex.completed ? 'bg-[#10B981] text-white' : startBtnClass}">
-                                    ${ex.completed ? '<i class="fas fa-check"></i>' : isTimerRunning ? 'Stop' : 'Start'}
-                                </div>
-                                <div class="flex-1 min-w-0">
-                                    <h3 class="font-medium text-gray-800 ${ex.completed ? 'text-green-800' : ''} truncate">${ex.title}</h3>
-                                    <div class="flex items-center mt-1 flex-wrap gap-y-1">
-                                        <p class="text-xs ${isActive ? 'font-bold' : 'text-gray-400'} flex items-center gap-2">
-                                            ${timeText} <span class="bg-black/5 px-1.5 rounded font-normal text-gray-500">${ex.bpm} BPM</span> ${!ex.autoStart ? '<i class="fas fa-volume-mute text-xs text-gray-400"></i>' : ''}
-                                        </p>
-                                        ${repsBadge}
-                                        ${statBadge}
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="flex items-center">${rightContent}<div class="py-4 pl-3 pr-4 text-gray-300 hover:text-[#E53935] cursor-pointer" onpointerdown="event.stopPropagation()" onclick="openDetailsView(${ex.id})"><i class="fas fa-chevron-right"></i></div></div>
-                        </div>
-                    </div>`;
-            });
-        }
+       function updateExerciseTitle(newTitle) {
+           const ex = getExerciseById(state.viewingExerciseId);
+           if(ex) { ex.title = newTitle; saveData(); renderExercises(); }
+       }
 
-        function formatTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`; }
-        function openDetailsView(id) {
-            state.viewingExerciseId = id; const ex = getExerciseById(id);
-            document.getElementById('detail-title-input').value = ex.title;
-            document.getElementById('detail-stat-name-input').value = ex.statisticName || "";
-            document.getElementById('detail-bpm').innerText = `${ex.bpm} BPM`;
-            document.getElementById('detail-min-display').innerText = `${Math.floor(ex.durationSec / 60)} min`;
-            document.getElementById('detail-sec-display').innerText = `${(ex.durationSec % 60).toString().padStart(2, '0')} sec`;
-            document.getElementById('detail-autostart').checked = ex.autoStart;
-            document.getElementById('detail-comment').value = ex.comment || "";
-            document.getElementById('detail-reps-display').innerText = ex.reps;
-            document.getElementById('detail-reps-indicator').innerText = `Rep ${ex.currentRep}/${ex.reps}`;
-            document.getElementById('details-menu-dropdown').classList.add('hidden');
-            document.getElementById('dashboard-view').classList.remove('active');
-            document.getElementById('details-view').classList.add('active');
-            document.getElementById('detail-time-display').innerText = formatTime((state.activeExerciseId === id) ? state.exerciseRemaining : ex.remainingSec);
-            renderCommentAttachments(ex.comment); updateDetailsUI();
-        }
-        function updateDetailsUI() { const btn = document.getElementById('detail-play-btn'), active = state.activeExerciseId === state.viewingExerciseId && state.isExercisePlaying; btn.innerText = active ? "Pause" : "Start"; btn.className = active ? "btn-primary flex-1 py-3" : "btn-secondary flex-1 py-3"; }
-        function toggleDetailPlay() { state.activeExerciseId===state.viewingExerciseId && state.isExercisePlaying ? pauseSequence() : playExercise(state.viewingExerciseId); updateDetailsUI(); }
-        function resetRoutine() { resetRoutineLogic(); updateUI(); }
-        function resetRoutineLogic() { pauseSequence(); state.activeExerciseId = null; state.exerciseRemaining = 0; state.globalSeconds = 0; getCurrentRoutine().exercises.forEach(e => { e.completed = false; e.remainingSec = e.durationSec; e.currentRep = 1; }); saveData(); updateUI(); }
-        function toggleSidebar(s) { document.getElementById('sidebar-menu').classList.toggle('-translate-x-full', !s); document.getElementById('sidebar-overlay').classList.toggle('hidden', !s); renderSidebarRoutines(); }
-        function renderSidebarRoutines() { 
-            const l=document.getElementById('routine-list-container'); l.innerHTML=''; 
-            state.routines.forEach(r=>{ 
-                l.innerHTML+=`<li class="flex justify-between items-center p-2 hover:bg-white/10 rounded group"><span onclick="switchRoutine('${r.id}')" class="flex-1 cursor-pointer truncate mr-2 ${r.id===state.currentRoutineId?'font-bold bg-white/20':''}">${r.name}</span><div class="flex items-center gap-3 opacity-80 group-hover:opacity-100 flex-shrink-0"><button onclick="exportSingleRoutine('${r.id}')"><i class="fas fa-file-export text-xs"></i></button><button onclick="renameRoutine('${r.id}')"><i class="fas fa-pencil-alt text-xs"></i></button><button onclick="deleteRoutine('${r.id}')"><i class="fas fa-trash text-xs"></i></button></div></li>`; 
-            }); 
-        }
-        function deleteRoutine(id) { if(state.routines.length<=1)return alert("Cannot delete only routine."); if(confirm("Delete?")){ state.routines.splice(state.routines.findIndex(r=>r.id===id),1); if(state.currentRoutineId===id)switchRoutine(state.routines[0].id); else renderSidebarRoutines(); saveData(); } }
-        function renameRoutine(id) { const r=state.routines.find(r=>r.id===id), n=prompt("Rename:", r.name); if(n){ r.name=n; saveData(); renderSidebarRoutines(); if(state.currentRoutineId===id)updateUI(); } }
-        function switchRoutine(id) { pauseSequence(); state.currentRoutineId=id; saveData(); toggleSidebar(false); updateUI(); }
-        function showAddRoutineInput() { const n=prompt("New Routine Name:"); if(n){ state.routines.push({id:Date.now().toString(),name:n,exercises:[]}); saveData(); renderSidebarRoutines(); } }
-        function toggleModal(s) { document.getElementById('create-modal').classList.toggle('hidden',!s); }
-        function adjustDetailBPM(v) { const ex=getExerciseById(state.viewingExerciseId); ex.bpm=Math.max(1,ex.bpm+v); document.getElementById('detail-bpm').innerText=`${ex.bpm} BPM`; saveData(); if(state.activeExerciseId===ex.id){state.bpm=ex.bpm; Tone.Transport.bpm.value = ex.bpm; updateUI();} }
-        function updateDetailAutoStart(c) { const ex=getExerciseById(state.viewingExerciseId); ex.autoStart=c; saveData(); if(state.activeExerciseId===ex.id && state.isExercisePlaying) { state.isAudioOn = c; c?startMetronomeAudio():stopMetronomeAudio(); updateUI(); } }
-        function adjustNewBPM(v) { state.newExerciseForm.bpm+=v; document.getElementById('new-bpm-display').innerText=`${state.newExerciseForm.bpm} BPM`; }
-        function adjustNewReps(v) { state.newExerciseForm.reps=Math.max(1,state.newExerciseForm.reps+v); document.getElementById('new-reps-display').innerText=state.newExerciseForm.reps; }
-        function adjustNewTime(type,val) { if(type==='min') state.newExerciseForm.min=Math.max(0,state.newExerciseForm.min+val); else state.newExerciseForm.sec=Math.max(0,state.newExerciseForm.sec+val); document.getElementById('new-min-display').innerText=`${state.newExerciseForm.min} min`; document.getElementById('new-sec-display').innerText=`${state.newExerciseForm.sec.toString().padStart(2,'0')} sec`; }
-        function addNewExercise() { 
-            const titleInput = document.getElementById('new-title');
-            const t = titleInput.value; 
-            if(!t) { alert("Please enter a title for the exercise."); return; }
-            const sNameInput = document.getElementById('new-stat-name');
-            const sName = sNameInput.value;
-            const total = (state.newExerciseForm.min * 60) + state.newExerciseForm.sec; 
-            const newExercise = {
-                id: Date.now(), title: t, bpm: state.newExerciseForm.bpm, durationSec: total, remainingSec: total,
-                completed: false, autoStart: document.getElementById('new-autostart').checked, archived: false,
-                reps: state.newExerciseForm.reps, currentRep: 1, statisticName: sName ? sName : null, statisticLogs: [], comment: ""
-            };
-            getCurrentRoutine().exercises.push(newExercise); 
-            saveData(); titleInput.value = ''; sNameInput.value = ''; 
-            toggleModal(false); updateUI(); 
-            setTimeout(() => { const list = document.getElementById('exercise-list'); list.scrollTop = list.scrollHeight; }, 50);
-        }
-        function toggleAutoplay(c) { state.autoplayRoutine=c; }
-        function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); renderCommentAttachments(v); }
-        function adjustDetailReps(v) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; ex.reps=Math.max(1,ex.reps+v); if(ex.currentRep>ex.reps)ex.currentRep=1; saveData(); document.getElementById('detail-reps-display').innerText=ex.reps; document.getElementById('detail-reps-indicator').innerText=`Rep ${ex.currentRep}/${ex.reps}`; updateUI(); }
-        function adjustDetailTime(type,val) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; let total=ex.durationSec; if(type==='min') total=Math.max(0,total+(val*60)); else total=Math.max(0,total+val); ex.durationSec=total; ex.remainingSec=total; saveData(); document.getElementById('detail-min-display').innerText=`${Math.floor(total/60)} min`; document.getElementById('detail-sec-display').innerText=`${(total%60).toString().padStart(2,'0')} sec`; }
-        function resetCurrentDetailExercise() {
-            const id = state.viewingExerciseId, ex = getExerciseById(id);
-            if (ex) {
-                if (ex.completed) { const d = ex.durationSec; state.globalSeconds = Math.max(0, state.globalSeconds - d); recordProgressSeconds(-d); }
-                ex.remainingSec = ex.durationSec; ex.completed = false; ex.currentRep = 1;
-                if (state.activeExerciseId === id) { pauseSequence(); state.exerciseRemaining = ex.durationSec; }
-                saveData(); updateDetailsUI();
-                document.getElementById('detail-time-display').innerText = formatTime(ex.durationSec);
-                document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
-            }
-        }
-        function completeDetailExercise() {
-            const ex = getExerciseById(state.viewingExerciseId); if (!ex) return;
-            if (ex.statisticName && !ex.completed) {
-                state.pendingDetailCompletion = true; state.activeExerciseId = ex.id; 
-                if (state.isExercisePlaying) { pauseSequence(); }
-                document.getElementById('stat-modal-title').innerText = ex.statisticName;
-                document.getElementById('stat-input-value').value = '';
-                document.getElementById('stat-input-modal').classList.remove('hidden');
-                setTimeout(() => document.getElementById('stat-input-value').focus(), 100);
-                return;
-            }
-            forceFinishDetail();
-        }
-        function forceFinishDetail() {
-            const ex = getExerciseById(state.viewingExerciseId); if (!ex) return;
-            let timeToAdd = 0;
-            if (state.activeExerciseId === ex.id) {
-                timeToAdd = state.exerciseRemaining; pauseSequence();
-            } else { timeToAdd = ex.remainingSec; }
-            state.globalSeconds += timeToAdd; recordProgressSeconds(timeToAdd);
-            ex.completed = true; ex.remainingSec = 0; saveData(); closeDetailsView();
-        }
-        function toggleDetailsMenu(e) { e.stopPropagation(); document.getElementById('details-menu-dropdown').classList.toggle('hidden'); }
-        function handleWindowClick(e) { const m=document.getElementById('details-menu-dropdown'), b=document.getElementById('details-menu-btn'); if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden'); }
-        function duplicateExercise() { const o=getExerciseById(state.viewingExerciseId); if(!o)return; const c=JSON.parse(JSON.stringify(o)); c.id=Date.now(); c.title+=" (Copy)"; c.completed=false; c.remainingSec=c.durationSec; c.currentRep=1; const r=getCurrentRoutine(); r.exercises.splice(r.exercises.findIndex(e=>e.id===o.id)+1,0,c); saveData(); closeDetailsView(); }
-        function archiveExercise() { const ex=getExerciseById(state.viewingExerciseId); if(ex && confirm("Archive?")){ ex.archived=true; saveData(); closeDetailsView(); } }
-        function deleteDetailExercise() { const r=getCurrentRoutine(); if(confirm("Delete?")){ r.exercises.splice(r.exercises.findIndex(e=>e.id===state.viewingExerciseId),1); saveData(); closeDetailsView(); } }
-        function showArchivedCount() { alert(`Archived: ${getCurrentRoutine().exercises.filter(e=>e.archived).length}`); }
-        function closeDetailsView() { state.viewingExerciseId=null; document.getElementById('details-view').classList.remove('active'); document.getElementById('dashboard-view').classList.add('active'); updateUI(); }
+       function updateDetailStatName(newVal) {
+           const ex = getExerciseById(state.viewingExerciseId);
+           if(ex) { 
+               ex.statisticName = newVal.trim() === "" ? null : newVal; 
+               saveData(); 
+               renderExercises(); 
+           }
+       }
 
-        // --- STATS VIEW ---
-        let weeklyChartInstance = null, routineChartInstance = null, progressChartInstance = null;
-        function openStatsView() { toggleSidebar(false); document.getElementById('dashboard-view').classList.remove('active'); document.getElementById('details-view').classList.remove('active'); document.getElementById('stats-view').classList.add('active'); renderStats(); }
-        function closeStatsView() { document.getElementById('stats-view').classList.remove('active'); document.getElementById('dashboard-view').classList.add('active'); }
-        function stringToColor(str) { let hash = 0; for (let i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); } return '#' + "00000".substring(0, 6 - (hash & 0x00FFFFFF).toString(16).toUpperCase().length) + (hash & 0x00FFFFFF).toString(16).toUpperCase(); }
-        
-        function renderStats() {
-            const entries = Object.entries(state.stats);
-            const totalSecondsAllTime = entries.reduce((acc, [_, data]) => acc + (data.totalSec || 0), 0);
-            const dates = Object.keys(state.stats).sort();
-            let streak = 0;
-            if (dates.length > 0) {
-                const todayStr = new Date().toISOString().split('T')[0], yesterdayStr = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-                let lastDateStr = new Date(dates[dates.length-1]).toISOString().split('T')[0];
-                if (lastDateStr === todayStr || lastDateStr === yesterdayStr) {
-                    streak = 1;
-                    for (let i = dates.length - 2; i >= 0; i--) {
-                        if (Math.ceil(Math.abs(new Date(dates[i+1]) - new Date(dates[i])) / (864e5)) === 1) streak++; else break;
-                    }
-                }
-            }
-            document.getElementById('stat-total-time').innerText = `${Math.floor(totalSecondsAllTime / 3600)}h ${Math.floor((totalSecondsAllTime % 3600) / 60)}m`;
-            document.getElementById('stat-streak').innerText = streak;
+       function recordProgressSeconds(seconds) {
+           const today = new Date().toISOString().split('T')[0];
+           if (!state.stats[today]) state.stats[today] = { totalSec: 0, routines: {} };
+           state.stats[today].totalSec = Math.max(0, state.stats[today].totalSec + seconds);
+           const currentR = getCurrentRoutine();
+           if (currentR) {
+               if (!state.stats[today].routines[currentR.name]) state.stats[today].routines[currentR.name] = 0;
+               state.stats[today].routines[currentR.name] = Math.max(0, state.stats[today].routines[currentR.name] + seconds);
+           }
+       }
 
-            const last7DaysLabels = [], last7DaysKeys = [];
-            for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); last7DaysKeys.push(d.toISOString().split('T')[0]); last7DaysLabels.push(d.toLocaleDateString('en-US', { weekday: 'short' })); }
-            const uniqueRoutines = new Set();
-            last7DaysKeys.forEach(k => { if (state.stats[k]?.routines) Object.keys(state.stats[k].routines).forEach(r => uniqueRoutines.add(r)); });
-            const datasets = Array.from(uniqueRoutines).map(name => ({
-                label: name, data: last7DaysKeys.map(k => Math.round((state.stats[k]?.routines?.[name] || 0) / 60)),
-                backgroundColor: stringToColor(name), borderRadius: 2
-            }));
-            if (weeklyChartInstance) weeklyChartInstance.destroy();
-            weeklyChartInstance = new Chart(document.getElementById('weeklyChart').getContext('2d'), {
-                type: 'bar', data: { labels: last7DaysLabels, datasets },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: {size: 10} } } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
-            });
+       function getFirstUrl(text) { return (text.match(/(https?:\/\/[^\s]+)/i) || [])[0]; }
+       function getFirstImage(text) { return (text.match(/(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/i) || [])[0]; }
 
-            const routineTotals = {}; entries.forEach(([_, d]) => { if (d.routines) Object.entries(d.routines).forEach(([n, s]) => routineTotals[n] = (routineTotals[n] || 0) + s); });
-            const rLabels = Object.keys(routineTotals), rData = Object.values(routineTotals).map(s => Math.round(s/60));
-            if (routineChartInstance) routineChartInstance.destroy();
-            routineChartInstance = new Chart(document.getElementById('routineChart').getContext('2d'), {
-                type: 'doughnut', data: { labels: rLabels, datasets: [{ data: rData, backgroundColor: rLabels.map(stringToColor), borderWidth: 0 }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } } }
-            });
+       function renderCommentAttachments(text) {
+           const imgContainer = document.getElementById('detail-image-preview');
+           const linkContainer = document.getElementById('detail-link-list');
+           imgContainer.innerHTML = ''; linkContainer.innerHTML = '';
+           if (!text) return;
+           
+           const images = text.match(/(https?:\/\/[^\s]*\.(?:png|jpg|jpeg|gif|webp|svg)[^\s]*)/ig) || [];
+           images.forEach(url => {
+               const img = document.createElement('img');
+               img.src = url; img.className = "w-20 h-20 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition shadow-sm bg-gray-50";
+               img.onclick = () => openImageModal(url); img.onerror = () => img.style.display = 'none';
+               imgContainer.appendChild(img);
+           });
 
-            let allStats = [];
-            state.routines.forEach(r => {
-                r.exercises.forEach(e => {
-                    if (e.statisticLogs && e.statisticLogs.length > 0) {
-                        allStats.push({ name: `${e.title} (${e.statisticName})`, logs: e.statisticLogs });
-                    }
-                });
-            });
+           const allLinks = text.match(/(https?:\/\/[^\s]+)/ig) || [];
+           allLinks.forEach(url => {
+               if(!images.includes(url)) {
+                   const btn = document.createElement('a');
+                   btn.href = url; btn.target = "_blank";
+                   btn.className = "flex items-center gap-2 text-[#E53935] hover:underline bg-red-50 p-2 rounded text-sm w-fit max-w-full truncate";
+                   btn.innerHTML = `<i class="fas fa-link"></i> <span class="truncate">${url}</span>`;
+                   linkContainer.appendChild(btn);
+               }
+           });
+       }
 
-            const startVal = document.getElementById('stat-filter-start').value;
-            const endVal = document.getElementById('stat-filter-end').value;
-            let uniqueDates = new Set();
-            allStats.forEach(stat => {
-                stat.logs.forEach(log => {
-                    if (log.date >= startVal && log.date <= endVal) {
-                        uniqueDates.add(log.date);
-                    }
-                });
-            });
-            const sortedDates = Array.from(uniqueDates).sort();
+       function openImageModal(url) {
+           const modal = document.getElementById('image-lightbox'), img = document.getElementById('lightbox-img');
+           img.src = url; modal.classList.remove('hidden'); setTimeout(() => img.classList.remove('scale-95'), 10);
+       }
+       function closeImageModal() {
+           const modal = document.getElementById('image-lightbox'), img = document.getElementById('lightbox-img');
+           img.classList.add('scale-95'); setTimeout(() => modal.classList.add('hidden'), 200);
+       }
 
-            const progressDatasets = allStats.map(stat => {
-                const data = sortedDates.map(date => {
-                    const entry = stat.logs.find(l => l.date === date);
-                    return entry ? entry.value : null;
-                });
-                if (data.every(v => v === null)) return null;
-                return {
-                    label: stat.name, data: data,
-                    borderColor: stringToColor(stat.name), backgroundColor: stringToColor(stat.name),
-                    tension: 0.1, fill: false, spanGaps: true
-                };
-            }).filter(ds => ds !== null);
+       window.onload = function() {
+       loadData();
+       
+       // CAMBIO AQUÍ: Guardar todo justo antes de salir o recargar
+       window.addEventListener('beforeunload', () => saveData()); 
 
-            if (progressChartInstance) progressChartInstance.destroy();
-            progressChartInstance = new Chart(document.getElementById('progressChart').getContext('2d'), {
-                type: 'line', data: { labels: sortedDates, datasets: progressDatasets },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: {size: 10} } }, tooltip: { mode: 'index', intersect: false } },
-                    scales: { x: { title: { display: true, text: 'Date' } }, y: { title: { display: true, text: 'Value' }, beginAtZero: true } }
-                }
-            });
-        }
-    </script>
+       new Sortable(document.getElementById('exercise-list'), {
+           animation: 150, delay: 300, delayOnTouchOnly: true, handle: '.draggable-item',
+           onEnd: function (evt) {
+               const routine = getCurrentRoutine();
+               routine.exercises.splice(evt.newIndex, 0, routine.exercises.splice(evt.oldIndex, 1)[0]);
+               saveData();
+           }
+       });
+       updateUI();
+   };
+
+       function finishAndResetRoutine() {
+           if(!confirm("Finish routine? This resets exercises.")) return;
+           pauseSequence();
+           state.activeExerciseId = null; state.exerciseRemaining = 0; state.globalSeconds = 0;
+           getCurrentRoutine().exercises.forEach(e => { e.completed = false; e.remainingSec = e.durationSec; e.currentRep = 1; });
+           saveData(); updateUI(); alert("Routine Completed!");
+       }
+
+       function sanitizeImportedRoutine(r) {
+           return {
+               id: Date.now() + Math.random().toString(), name: r.name + " (Import)",
+               exercises: (r.exercises||[]).map(ex => ({
+                   id: Date.now() + Math.floor(Math.random()*100000), title: ex.title||"Untitled", bpm: ex.bpm||100,
+                   durationSec: ex.durationSec||60, remainingSec: ex.durationSec||60, completed: false,
+                   autoStart: ex.autoStart??true, archived: !!ex.archived, reps: ex.reps||1, currentRep: 1, comment: ex.comment||"",
+                   statisticName: ex.statisticName||null, statisticLogs: ex.statisticLogs||[]
+               }))
+           };
+       }
+       function triggerSmartImport() { document.getElementById('import-smart-input').click(); }
+       function importSmartRoutines(input) {
+           if(!input.files[0]) return;
+           const r = new FileReader();
+           r.onload = (e) => {
+               try {
+                   const json = JSON.parse(e.target.result);
+                   const toAdd = (Array.isArray(json) ? json : [json]).map(sanitizeImportedRoutine);
+                   state.routines.push(...toAdd); saveData(); renderSidebarRoutines(); toggleSidebar(true); alert(`Imported ${toAdd.length}`);
+               } catch(err){ alert("Error: "+err.message); }
+           };
+           r.readAsText(input.files[0]); input.value='';
+       }
+       function triggerFullRestore() { document.getElementById('import-full-input').click(); }
+       function restoreAllRoutines(input) {
+           if(!input.files[0] || !confirm("Overwrite all?")) return;
+           const r = new FileReader();
+           r.onload = (e) => {
+               try {
+                   const json = JSON.parse(e.target.result);
+                   state.routines = json.routines || (Array.isArray(json)?json:[]);
+                   state.stats = json.stats || state.stats;
+                   state.currentRoutineId = state.routines[0]?.id || 'default';
+                   saveData(); resetRoutineLogic(); updateUI(); toggleSidebar(false); alert("Restored!");
+               } catch(e){alert("Error");}
+           };
+           r.readAsText(input.files[0]); input.value='';
+       }
+       function exportRoutines() { downloadJSON(JSON.stringify({routines:state.routines,stats:state.stats},null,2), `backup_${new Date().toISOString().slice(0,10)}.json`); }
+       function exportSingleRoutine(id) {
+           const r = state.routines.find(x=>x.id===id); if(r) downloadJSON(JSON.stringify(r,null,2), `routine_${r.name.replace(/\W/g,'_')}.json`);
+       }
+       function downloadJSON(c,n) { const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([c],{type:"application/json"})); a.download=n; a.click(); }
+
+       // Audio & Playback
+       function toggleGlobalAudioOnly() {
+           state.isAudioOn = !state.isAudioOn;
+           if (state.isAudioOn) { 
+               initAudio().then(startMetronomeAudio); 
+           } else { 
+               stopMetronomeAudio();
+           }
+           updateUI();
+       }
+       function adjustGlobalBPM(val) {
+           state.bpm = Math.max(1, Math.min(300, state.bpm + val));
+           if(state.activeExerciseId) { const ex = getExerciseById(state.activeExerciseId); if(ex) ex.bpm = state.bpm; }
+           Tone.Transport.bpm.value = state.bpm;
+           updateUI();
+       }
+       function toggleListExercise(id) {
+           if (state.activeExerciseId === id && state.isExercisePlaying) pauseSequence(); else playExercise(id);
+       }
+       function playExercise(id) {
+           const ex = getExerciseById(id); if (!ex) return;
+           if (state.activeExerciseId && state.activeExerciseId !== id) {
+               const prev = getExerciseById(state.activeExerciseId); if(prev) prev.remainingSec = state.exerciseRemaining;
+           }
+           state.activeExerciseId = id;
+           state.exerciseRemaining = (ex.remainingSec <= 0) ? ex.durationSec : ex.remainingSec;
+           state.bpm = ex.bpm; 
+           state.isExercisePlaying = true;
+           
+           // Iniciamos el worker (reloj del sistema)
+           worker.postMessage('start');
+
+           initAudio().then(() => {
+               Tone.Transport.bpm.value = state.bpm;
+               if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); } 
+               else { state.isAudioOn = false; stopMetronomeAudio(); }
+           });
+           updateUI(); saveData();
+       }
+       function pauseSequence() {
+           if (state.activeExerciseId) { const ex = getExerciseById(state.activeExerciseId); if(ex) ex.remainingSec = state.exerciseRemaining; }
+           state.isExercisePlaying = false; 
+           state.isAudioOn = false; 
+           
+           // Detenemos worker y audio
+           worker.postMessage('stop');
+           stopMetronomeAudio(); 
+           
+           saveData(); updateUI();
+       }
+       
+       // --- NEW STATISTIC LOGIC ---
+       function submitStatInput() {
+           const val = parseFloat(document.getElementById('stat-input-value').value);
+           if (!isNaN(val)) {
+               const ex = getExerciseById(state.activeExerciseId);
+               if (ex) {
+                   const today = new Date().toISOString().split('T')[0];
+                   if(!ex.statisticLogs) ex.statisticLogs = [];
+                   ex.statisticLogs.push({ date: today, value: val });
+                   saveData();
+               }
+           }
+           closeStatModalAndFinish();
+       }
+
+       function skipStatInput() {
+           closeStatModalAndFinish();
+       }
+
+      function closeStatModalAndFinish() {
+           document.getElementById('stat-input-modal').classList.add('hidden');
+           
+           if (state.pendingDetailCompletion) {
+               state.pendingDetailCompletion = false; 
+               forceFinishDetail(); 
+           } else {
+               finalizeCompletion(false); 
+           }
+       }
+       
+       function handleExerciseCompletion() {
+           // Esta función se llama desde el worker, aseguramos que el contexto de audio esté activo para el sonido
+           const ex = getExerciseById(state.activeExerciseId); if (!ex) return;
+           
+           playBellSound();
+           
+           if (ex.statisticName && !ex.completed) {
+               pauseSequence(); // Esto detiene el worker y el audio
+               
+               document.getElementById('stat-modal-title').innerText = ex.statisticName;
+               document.getElementById('stat-input-value').value = '';
+               document.getElementById('stat-input-modal').classList.remove('hidden');
+               setTimeout(() => document.getElementById('stat-input-value').focus(), 100);
+               return; 
+           }
+           
+           finalizeCompletion(false);
+       }
+
+       function finalizeCompletion(playSound = true) {
+           const ex = getExerciseById(state.activeExerciseId);
+           
+           if (playSound) playBellSound();
+           
+           if (ex.currentRep < ex.reps) {
+               ex.currentRep++; state.exerciseRemaining = ex.durationSec; ex.remainingSec = ex.durationSec;
+               state.isExercisePlaying = true;
+               
+               // Reiniciar worker para asegurar timing fresco
+               worker.postMessage('stop');
+               worker.postMessage('start');
+               
+               if (ex.autoStart) { state.isAudioOn = true; startMetronomeAudio(); }
+               updateUI(); saveData();
+           } else {
+               pauseSequence();
+               ex.completed = true; ex.remainingSec = 0; saveData(); updateUI();
+               if (state.autoplayRoutine) {
+                   const routine = getCurrentRoutine();
+                   const activeList = routine.exercises.filter(e => !e.archived);
+                   const idx = activeList.findIndex(e => e.id === state.activeExerciseId);
+                   if (idx < activeList.length - 1) setTimeout(() => playExercise(activeList[idx+1].id), 1500);
+                   else finishAndResetRoutine();
+               }
+           }
+       }
+
+       // --- EDIT STATS LOGIC ---
+       function openEditStatsModal() {
+           const list = document.getElementById('edit-stats-list');
+           list.innerHTML = '';
+           
+           let allLogs = [];
+           state.routines.forEach(r => {
+               r.exercises.forEach(e => {
+                   if (e.statisticLogs && e.statisticLogs.length > 0) {
+                       e.statisticLogs.forEach((log, index) => {
+                           allLogs.push({
+                               routineId: r.id, exerciseId: e.id, index: index,
+                               title: e.title, statName: e.statisticName || "Stat",
+                               date: log.date, value: log.value
+                           });
+                       });
+                   }
+               });
+           });
+
+           allLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+           if (allLogs.length === 0) {
+               list.innerHTML = '<div class="text-center text-gray-400 py-8">No statistics recorded yet.</div>';
+           } else {
+               allLogs.forEach(item => {
+                   const div = document.createElement('div');
+                   div.className = "bg-white p-3 rounded shadow-sm border border-gray-100 flex justify-between items-center";
+                   div.innerHTML = `
+                       <div>
+                           <div class="text-xs text-gray-400 font-bold">${item.date}</div>
+                           <div class="font-medium text-gray-700 leading-tight">${item.title}</div>
+                           <div class="text-xs text-[#E53935]">${item.statName}: <span class="font-bold text-lg text-gray-800 ml-1">${item.value}</span></div>
+                       </div>
+                       <div class="flex items-center gap-2">
+                           <button onclick="editStatValue('${item.routineId}', ${item.exerciseId}, ${item.index})" class="w-8 h-8 rounded-full bg-blue-50 text-blue-500 hover:bg-blue-100 flex items-center justify-center transition-colors"><i class="fas fa-pencil-alt text-xs"></i></button>
+                           <button onclick="deleteStatLog('${item.routineId}', ${item.exerciseId}, ${item.index})" class="w-8 h-8 rounded-full bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors"><i class="fas fa-trash text-xs"></i></button>
+                       </div>
+                   `;
+                   list.appendChild(div);
+               });
+           }
+           document.getElementById('edit-stats-modal').classList.remove('hidden');
+       }
+
+       function editStatValue(rId, eId, index) {
+           const r = state.routines.find(x => x.id == rId);
+           const e = r.exercises.find(x => x.id == eId);
+           const log = e.statisticLogs[index];
+           
+           const newVal = prompt(`Edit value for ${e.title} on ${log.date}:`, log.value);
+           if (newVal !== null && newVal.trim() !== "") {
+               const num = parseFloat(newVal);
+               if (!isNaN(num)) {
+                   log.value = num;
+                   saveData();
+                   openEditStatsModal(); renderStats(); renderExercises();
+               } else {
+                   alert("Please enter a valid number.");
+               }
+           }
+       }
+
+       function deleteStatLog(rId, eId, index) {
+           if(confirm("Are you sure you want to delete this record?")) {
+               const r = state.routines.find(x => x.id == rId);
+               const e = r.exercises.find(x => x.id == eId);
+               e.statisticLogs.splice(index, 1);
+               saveData();
+               openEditStatsModal(); renderStats(); renderExercises();
+           }
+       }
+
+       // --- SAFE ROUTINE GETTER (CRASH FIX) ---
+       function getCurrentRoutine() {
+           let routine = state.routines.find(r => r.id === state.currentRoutineId);
+           if (!routine) {
+               console.warn("Rutina actual no encontrada, reseteando a la primera disponible.");
+               if (state.routines.length > 0) {
+                   state.currentRoutineId = state.routines[0].id;
+                   routine = state.routines[0];
+               } else {
+                   routine = { id: 'default-' + Date.now(), name: 'Rutina Recuperada', exercises: [] };
+                   state.routines = [routine];
+                   state.currentRoutineId = routine.id;
+               }
+               saveData();
+           }
+           return routine;
+       }
+       function getExerciseById(id) { return getCurrentRoutine().exercises.find(e => e.id === id); }
+       
+       // --- UI RENDERERS ---
+       function updateUI() {
+           renderExercises();
+           document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
+           document.getElementById('global-bpm-display').innerText = `${state.bpm} BPM`;
+           document.getElementById('current-routine-title').innerText = getCurrentRoutine().name;
+           const icon = document.getElementById('global-play-icon'), btn = document.getElementById('global-play-btn');
+           if (state.isAudioOn) { icon.className = "fas fa-pause text-3xl text-white"; btn.classList.add('bg-white/40'); } 
+           else { icon.className = "fas fa-play text-3xl text-white pl-1"; btn.classList.remove('bg-white/40'); }
+       }
+
+       function renderExercises() {
+           const list = document.getElementById('exercise-list'); list.innerHTML = '';
+           const currentRoutine = getCurrentRoutine(); if(!currentRoutine) return;
+           const visibleExercises = currentRoutine.exercises.filter(e => !e.archived);
+           document.getElementById('total-routine-time').innerText = formatTime(visibleExercises.reduce((acc, curr) => acc + (curr.durationSec * curr.reps), 0));
+
+           visibleExercises.forEach(ex => {
+               const isActive = ex.id === state.activeExerciseId;
+               const isTimerRunning = isActive && state.isExercisePlaying;
+               let progressPercent = 0;
+               const currentRemaining = isActive ? state.exerciseRemaining : ex.remainingSec;
+               let timeText = `${formatTime(currentRemaining)}/${formatTime(ex.durationSec)}`;
+               if (ex.completed) { progressPercent = 100; timeText = `${formatTime(ex.durationSec)}/${formatTime(ex.durationSec)}`; } 
+               else if(ex.durationSec > 0) { progressPercent = ((ex.durationSec - currentRemaining) / ex.durationSec) * 100; }
+
+               const repsBadge = ex.reps > 1 ? `<span class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded font-bold ml-2">Rep ${ex.currentRep}/${ex.reps}</span>` : '';
+               let statBadge = '';
+               if (ex.statisticName) {
+                   let valText = '';
+                   if (ex.statisticLogs && ex.statisticLogs.length > 0) {
+                       valText = `: <span class="font-bold">${ex.statisticLogs[ex.statisticLogs.length - 1].value}</span>`;
+                   }
+                   statBadge = `<span class="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded ml-2 border border-purple-200"><i class="fas fa-chart-bar mr-1"></i>${ex.statisticName}${valText}</span>`;
+               }
+               
+               const startBtnClass = isTimerRunning ? "bg-[#E53935] text-white border-none" : "btn-secondary";
+               const imgUrl = getFirstImage(ex.comment), anyUrl = getFirstUrl(ex.comment);
+               let rightContent = '';
+               if(imgUrl) rightContent += `<img src="${imgUrl}" class="w-12 h-12 flex-shrink-0 object-cover rounded border border-gray-200 bg-gray-50 shadow-sm cursor-zoom-in hover:opacity-80 transition ml-2" onclick="event.stopPropagation(); openImageModal('${imgUrl}')" onerror="this.style.display='none'">`;
+               if(anyUrl) rightContent += `<button onclick="event.stopPropagation(); window.open('${anyUrl}', '_blank')" class="w-10 h-10 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-[#E53935] hover:bg-gray-100 rounded-full transition ml-1"><i class="fas fa-external-link-alt"></i></button>`;
+
+               list.innerHTML += `
+                   <div class="draggable-item rounded-xl relative overflow-hidden transition-all shadow-sm border border-gray-100 mb-4 ${ex.completed ? 'bg-[#D1FAE5] border-green-200' : isActive ? 'bg-[#E0F2F1] border-green-100 scale-[1.02]' : 'bg-white'}">
+                       <div class="absolute inset-0 bg-[rgba(0,200,83,0.2)] z-0 progress-bar-fill" style="width: ${progressPercent}%"></div>
+                       <div class="flex items-center justify-between relative z-10 pr-2">
+                           <div class="flex items-center gap-4 flex-1 p-4" onclick="${!ex.completed ? `toggleListExercise(${ex.id})` : ''}">
+                               <div class="w-16 h-14 rounded-lg flex items-center justify-center font-bold text-lg transition-colors z-20 flex-shrink-0 ${ex.completed ? 'bg-[#10B981] text-white' : startBtnClass}">
+                                   ${ex.completed ? '<i class="fas fa-check"></i>' : isTimerRunning ? 'Stop' : 'Start'}
+                               </div>
+                               <div class="flex-1 min-w-0">
+                                   <h3 class="font-medium text-gray-800 ${ex.completed ? 'text-green-800' : ''} truncate">${ex.title}</h3>
+                                   <div class="flex items-center mt-1 flex-wrap gap-y-1">
+                                       <p class="text-xs ${isActive ? 'font-bold' : 'text-gray-400'} flex items-center gap-2">
+                                           ${timeText} <span class="bg-black/5 px-1.5 rounded font-normal text-gray-500">${ex.bpm} BPM</span> ${!ex.autoStart ? '<i class="fas fa-volume-mute text-xs text-gray-400"></i>' : ''}
+                                       </p>
+                                       ${repsBadge}
+                                       ${statBadge}
+                                   </div>
+                               </div>
+                           </div>
+                           <div class="flex items-center">${rightContent}<div class="py-4 pl-3 pr-4 text-gray-300 hover:text-[#E53935] cursor-pointer" onpointerdown="event.stopPropagation()" onclick="openDetailsView(${ex.id})"><i class="fas fa-chevron-right"></i></div></div>
+                       </div>
+                   </div>`;
+           });
+       }
+
+       function formatTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2, '0')}`; }
+       function openDetailsView(id) {
+           state.viewingExerciseId = id; const ex = getExerciseById(id);
+           document.getElementById('detail-title-input').value = ex.title;
+           document.getElementById('detail-stat-name-input').value = ex.statisticName || "";
+           document.getElementById('detail-bpm').innerText = `${ex.bpm} BPM`;
+           document.getElementById('detail-min-display').innerText = `${Math.floor(ex.durationSec / 60)} min`;
+           document.getElementById('detail-sec-display').innerText = `${(ex.durationSec % 60).toString().padStart(2, '0')} sec`;
+           document.getElementById('detail-autostart').checked = ex.autoStart;
+           document.getElementById('detail-comment').value = ex.comment || "";
+           document.getElementById('detail-reps-display').innerText = ex.reps;
+           document.getElementById('detail-reps-indicator').innerText = `Rep ${ex.currentRep}/${ex.reps}`;
+           document.getElementById('details-menu-dropdown').classList.add('hidden');
+           document.getElementById('dashboard-view').classList.remove('active');
+           document.getElementById('details-view').classList.add('active');
+           document.getElementById('detail-time-display').innerText = formatTime((state.activeExerciseId === id) ? state.exerciseRemaining : ex.remainingSec);
+           renderCommentAttachments(ex.comment); updateDetailsUI();
+       }
+       function updateDetailsUI() { const btn = document.getElementById('detail-play-btn'), active = state.activeExerciseId === state.viewingExerciseId && state.isExercisePlaying; btn.innerText = active ? "Pause" : "Start"; btn.className = active ? "btn-primary flex-1 py-3" : "btn-secondary flex-1 py-3"; }
+       function toggleDetailPlay() { state.activeExerciseId===state.viewingExerciseId && state.isExercisePlaying ? pauseSequence() : playExercise(state.viewingExerciseId); updateDetailsUI(); }
+       function resetRoutine() { resetRoutineLogic(); updateUI(); }
+       function resetRoutineLogic() { pauseSequence(); state.activeExerciseId = null; state.exerciseRemaining = 0; state.globalSeconds = 0; getCurrentRoutine().exercises.forEach(e => { e.completed = false; e.remainingSec = e.durationSec; e.currentRep = 1; }); saveData(); updateUI(); }
+       function toggleSidebar(s) { document.getElementById('sidebar-menu').classList.toggle('-translate-x-full', !s); document.getElementById('sidebar-overlay').classList.toggle('hidden', !s); renderSidebarRoutines(); }
+       function renderSidebarRoutines() { 
+           const l=document.getElementById('routine-list-container'); l.innerHTML=''; 
+           state.routines.forEach(r=>{ 
+               l.innerHTML+=`<li class="flex justify-between items-center p-2 hover:bg-white/10 rounded group"><span onclick="switchRoutine('${r.id}')" class="flex-1 cursor-pointer truncate mr-2 ${r.id===state.currentRoutineId?'font-bold bg-white/20':''}">${r.name}</span><div class="flex items-center gap-3 opacity-80 group-hover:opacity-100 flex-shrink-0"><button onclick="exportSingleRoutine('${r.id}')"><i class="fas fa-file-export text-xs"></i></button><button onclick="renameRoutine('${r.id}')"><i class="fas fa-pencil-alt text-xs"></i></button><button onclick="deleteRoutine('${r.id}')"><i class="fas fa-trash text-xs"></i></button></div></li>`; 
+           }); 
+       }
+       function deleteRoutine(id) { if(state.routines.length<=1)return alert("Cannot delete only routine."); if(confirm("Delete?")){ state.routines.splice(state.routines.findIndex(r=>r.id===id),1); if(state.currentRoutineId===id)switchRoutine(state.routines[0].id); else renderSidebarRoutines(); saveData(); } }
+       function renameRoutine(id) { const r=state.routines.find(r=>r.id===id), n=prompt("Rename:", r.name); if(n){ r.name=n; saveData(); renderSidebarRoutines(); if(state.currentRoutineId===id)updateUI(); } }
+       function switchRoutine(id) { pauseSequence(); state.currentRoutineId=id; saveData(); toggleSidebar(false); updateUI(); }
+       function showAddRoutineInput() { const n=prompt("New Routine Name:"); if(n){ state.routines.push({id:Date.now().toString(),name:n,exercises:[]}); saveData(); renderSidebarRoutines(); } }
+       function toggleModal(s) { document.getElementById('create-modal').classList.toggle('hidden',!s); }
+       function adjustDetailBPM(v) { const ex=getExerciseById(state.viewingExerciseId); ex.bpm=Math.max(1,ex.bpm+v); document.getElementById('detail-bpm').innerText=`${ex.bpm} BPM`; saveData(); if(state.activeExerciseId===ex.id){state.bpm=ex.bpm; Tone.Transport.bpm.value = ex.bpm; updateUI();} }
+       function updateDetailAutoStart(c) { const ex=getExerciseById(state.viewingExerciseId); ex.autoStart=c; saveData(); if(state.activeExerciseId===ex.id && state.isExercisePlaying) { state.isAudioOn = c; c?startMetronomeAudio():stopMetronomeAudio(); updateUI(); } }
+       function adjustNewBPM(v) { state.newExerciseForm.bpm+=v; document.getElementById('new-bpm-display').innerText=`${state.newExerciseForm.bpm} BPM`; }
+       function adjustNewReps(v) { state.newExerciseForm.reps=Math.max(1,state.newExerciseForm.reps+v); document.getElementById('new-reps-display').innerText=state.newExerciseForm.reps; }
+       function adjustNewTime(type,val) { if(type==='min') state.newExerciseForm.min=Math.max(0,state.newExerciseForm.min+val); else state.newExerciseForm.sec=Math.max(0,state.newExerciseForm.sec+val); document.getElementById('new-min-display').innerText=`${state.newExerciseForm.min} min`; document.getElementById('new-sec-display').innerText=`${state.newExerciseForm.sec.toString().padStart(2,'0')} sec`; }
+       function addNewExercise() { 
+           const titleInput = document.getElementById('new-title');
+           const t = titleInput.value; 
+           if(!t) { alert("Please enter a title for the exercise."); return; }
+           const sNameInput = document.getElementById('new-stat-name');
+           const sName = sNameInput.value;
+           const total = (state.newExerciseForm.min * 60) + state.newExerciseForm.sec; 
+           const newExercise = {
+               id: Date.now(), title: t, bpm: state.newExerciseForm.bpm, durationSec: total, remainingSec: total,
+               completed: false, autoStart: document.getElementById('new-autostart').checked, archived: false,
+               reps: state.newExerciseForm.reps, currentRep: 1, statisticName: sName ? sName : null, statisticLogs: [], comment: ""
+           };
+           getCurrentRoutine().exercises.push(newExercise); 
+           saveData(); titleInput.value = ''; sNameInput.value = ''; 
+           toggleModal(false); updateUI(); 
+           setTimeout(() => { const list = document.getElementById('exercise-list'); list.scrollTop = list.scrollHeight; }, 50);
+       }
+       function toggleAutoplay(c) { state.autoplayRoutine=c; }
+       function updateComment(v) { const ex=getExerciseById(state.viewingExerciseId); if(ex)ex.comment=v; saveData(); renderCommentAttachments(v); }
+       function adjustDetailReps(v) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; ex.reps=Math.max(1,ex.reps+v); if(ex.currentRep>ex.reps)ex.currentRep=1; saveData(); document.getElementById('detail-reps-display').innerText=ex.reps; document.getElementById('detail-reps-indicator').innerText=`Rep ${ex.currentRep}/${ex.reps}`; updateUI(); }
+       function adjustDetailTime(type,val) { const ex=getExerciseById(state.viewingExerciseId); if(!ex)return; let total=ex.durationSec; if(type==='min') total=Math.max(0,total+(val*60)); else total=Math.max(0,total+val); ex.durationSec=total; ex.remainingSec=total; saveData(); document.getElementById('detail-min-display').innerText=`${Math.floor(total/60)} min`; document.getElementById('detail-sec-display').innerText=`${(total%60).toString().padStart(2,'0')} sec`; }
+       function resetCurrentDetailExercise() {
+           const id = state.viewingExerciseId, ex = getExerciseById(id);
+           if (ex) {
+               if (ex.completed) { const d = ex.durationSec; state.globalSeconds = Math.max(0, state.globalSeconds - d); recordProgressSeconds(-d); }
+               ex.remainingSec = ex.durationSec; ex.completed = false; ex.currentRep = 1;
+               if (state.activeExerciseId === id) { pauseSequence(); state.exerciseRemaining = ex.durationSec; }
+               saveData(); updateDetailsUI();
+               document.getElementById('detail-time-display').innerText = formatTime(ex.durationSec);
+               document.getElementById('global-practice-timer').innerText = formatTime(state.globalSeconds);
+           }
+       }
+       function completeDetailExercise() {
+           const ex = getExerciseById(state.viewingExerciseId); if (!ex) return;
+           if (ex.statisticName && !ex.completed) {
+               state.pendingDetailCompletion = true; state.activeExerciseId = ex.id; 
+               if (state.isExercisePlaying) { pauseSequence(); }
+               document.getElementById('stat-modal-title').innerText = ex.statisticName;
+               document.getElementById('stat-input-value').value = '';
+               document.getElementById('stat-input-modal').classList.remove('hidden');
+               setTimeout(() => document.getElementById('stat-input-value').focus(), 100);
+               return;
+           }
+           forceFinishDetail();
+       }
+       function forceFinishDetail() {
+           const ex = getExerciseById(state.viewingExerciseId); if (!ex) return;
+           let timeToAdd = 0;
+           if (state.activeExerciseId === ex.id) {
+               timeToAdd = state.exerciseRemaining; pauseSequence();
+           } else { timeToAdd = ex.remainingSec; }
+           state.globalSeconds += timeToAdd; recordProgressSeconds(timeToAdd);
+           ex.completed = true; ex.remainingSec = 0; saveData(); closeDetailsView();
+       }
+       function toggleDetailsMenu(e) { e.stopPropagation(); document.getElementById('details-menu-dropdown').classList.toggle('hidden'); }
+       function handleWindowClick(e) { const m=document.getElementById('details-menu-dropdown'), b=document.getElementById('details-menu-btn'); if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden'); }
+       function duplicateExercise() { const o=getExerciseById(state.viewingExerciseId); if(!o)return; const c=JSON.parse(JSON.stringify(o)); c.id=Date.now(); c.title+=" (Copy)"; c.completed=false; c.remainingSec=c.durationSec; c.currentRep=1; const r=getCurrentRoutine(); r.exercises.splice(r.exercises.findIndex(e=>e.id===o.id)+1,0,c); saveData(); closeDetailsView(); }
+       function archiveExercise() { const ex=getExerciseById(state.viewingExerciseId); if(ex && confirm("Archive?")){ ex.archived=true; saveData(); closeDetailsView(); } }
+       function deleteDetailExercise() { const r=getCurrentRoutine(); if(confirm("Delete?")){ r.exercises.splice(r.exercises.findIndex(e=>e.id===state.viewingExerciseId),1); saveData(); closeDetailsView(); } }
+       function showArchivedCount() { alert(`Archived: ${getCurrentRoutine().exercises.filter(e=>e.archived).length}`); }
+       function closeDetailsView() { state.viewingExerciseId=null; document.getElementById('details-view').classList.remove('active'); document.getElementById('dashboard-view').classList.add('active'); updateUI(); }
+
+       // --- STATS VIEW ---
+       let weeklyChartInstance = null, routineChartInstance = null, progressChartInstance = null;
+       function openStatsView() { toggleSidebar(false); document.getElementById('dashboard-view').classList.remove('active'); document.getElementById('details-view').classList.remove('active'); document.getElementById('stats-view').classList.add('active'); renderStats(); }
+       function closeStatsView() { document.getElementById('stats-view').classList.remove('active'); document.getElementById('dashboard-view').classList.add('active'); }
+       function stringToColor(str) { let hash = 0; for (let i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); } return '#' + "00000".substring(0, 6 - (hash & 0x00FFFFFF).toString(16).toUpperCase().length) + (hash & 0x00FFFFFF).toString(16).toUpperCase(); }
+       
+       function renderStats() {
+           const entries = Object.entries(state.stats);
+           const totalSecondsAllTime = entries.reduce((acc, [_, data]) => acc + (data.totalSec || 0), 0);
+           const dates = Object.keys(state.stats).sort();
+           let streak = 0;
+           if (dates.length > 0) {
+               const todayStr = new Date().toISOString().split('T')[0], yesterdayStr = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+               let lastDateStr = new Date(dates[dates.length-1]).toISOString().split('T')[0];
+               if (lastDateStr === todayStr || lastDateStr === yesterdayStr) {
+                   streak = 1;
+                   for (let i = dates.length - 2; i >= 0; i--) {
+                       if (Math.ceil(Math.abs(new Date(dates[i+1]) - new Date(dates[i])) / (864e5)) === 1) streak++; else break;
+                   }
+               }
+           }
+           document.getElementById('stat-total-time').innerText = `${Math.floor(totalSecondsAllTime / 3600)}h ${Math.floor((totalSecondsAllTime % 3600) / 60)}m`;
+           document.getElementById('stat-streak').innerText = streak;
+
+           const last7DaysLabels = [], last7DaysKeys = [];
+           for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); last7DaysKeys.push(d.toISOString().split('T')[0]); last7DaysLabels.push(d.toLocaleDateString('en-US', { weekday: 'short' })); }
+           const uniqueRoutines = new Set();
+           last7DaysKeys.forEach(k => { if (state.stats[k]?.routines) Object.keys(state.stats[k].routines).forEach(r => uniqueRoutines.add(r)); });
+           const datasets = Array.from(uniqueRoutines).map(name => ({
+               label: name, data: last7DaysKeys.map(k => Math.round((state.stats[k]?.routines?.[name] || 0) / 60)),
+               backgroundColor: stringToColor(name), borderRadius: 2
+           }));
+           if (weeklyChartInstance) weeklyChartInstance.destroy();
+           weeklyChartInstance = new Chart(document.getElementById('weeklyChart').getContext('2d'), {
+               type: 'bar', data: { labels: last7DaysLabels, datasets },
+               options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: {size: 10} } } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
+           });
+
+           const routineTotals = {}; entries.forEach(([_, d]) => { if (d.routines) Object.entries(d.routines).forEach(([n, s]) => routineTotals[n] = (routineTotals[n] || 0) + s); });
+           const rLabels = Object.keys(routineTotals), rData = Object.values(routineTotals).map(s => Math.round(s/60));
+           if (routineChartInstance) routineChartInstance.destroy();
+           routineChartInstance = new Chart(document.getElementById('routineChart').getContext('2d'), {
+               type: 'doughnut', data: { labels: rLabels, datasets: [{ data: rData, backgroundColor: rLabels.map(stringToColor), borderWidth: 0 }] },
+               options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } } }
+           });
+
+           let allStats = [];
+           state.routines.forEach(r => {
+               r.exercises.forEach(e => {
+                   if (e.statisticLogs && e.statisticLogs.length > 0) {
+                       allStats.push({ name: `${e.title} (${e.statisticName})`, logs: e.statisticLogs });
+                   }
+               });
+           });
+
+           const startVal = document.getElementById('stat-filter-start').value;
+           const endVal = document.getElementById('stat-filter-end').value;
+           let uniqueDates = new Set();
+           allStats.forEach(stat => {
+               stat.logs.forEach(log => {
+                   if (log.date >= startVal && log.date <= endVal) {
+                       uniqueDates.add(log.date);
+                   }
+               });
+           });
+           const sortedDates = Array.from(uniqueDates).sort();
+
+           const progressDatasets = allStats.map(stat => {
+               const data = sortedDates.map(date => {
+                   const entry = stat.logs.find(l => l.date === date);
+                   return entry ? entry.value : null;
+               });
+               if (data.every(v => v === null)) return null;
+               return {
+                   label: stat.name, data: data,
+                   borderColor: stringToColor(stat.name), backgroundColor: stringToColor(stat.name),
+                   tension: 0.1, fill: false, spanGaps: true
+               };
+           }).filter(ds => ds !== null);
+
+           if (progressChartInstance) progressChartInstance.destroy();
+           progressChartInstance = new Chart(document.getElementById('progressChart').getContext('2d'), {
+               type: 'line', data: { labels: sortedDates, datasets: progressDatasets },
+               options: {
+                   responsive: true, maintainAspectRatio: false,
+                   plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: {size: 10} } }, tooltip: { mode: 'index', intersect: false } },
+                   scales: { x: { title: { display: true, text: 'Date' } }, y: { title: { display: true, text: 'Value' }, beginAtZero: true } }
+               }
+           });
+       }
+</script>
 </body>
 </html>
